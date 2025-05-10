@@ -4,6 +4,12 @@ import (
 	"errors"
 )
 
+type MetricUpdatePathRequest struct {
+	Type  MetricType
+	Name  string
+	Value string
+}
+
 type MetricID struct {
 	ID   string     `json:"id"`
 	Type MetricType `json:"type"`

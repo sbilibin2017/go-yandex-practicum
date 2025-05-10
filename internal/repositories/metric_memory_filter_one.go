@@ -21,11 +21,11 @@ func NewMetricFilterOneRepository(
 }
 
 func (r *MetricFilterOneRepository) FilterOne(
-	ctx context.Context, id types.MetricID,
+	ctx context.Context, filter types.MetricID,
 ) (*types.Metrics, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	metric, exists := r.data[id]
+	metric, exists := r.data[filter]
 	if !exists {
 		return nil, nil
 	}

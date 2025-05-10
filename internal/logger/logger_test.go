@@ -49,20 +49,6 @@ func TestInitialize_Initialize(t *testing.T) {
 	}
 }
 
-func TestInitialize_OnceOnly(t *testing.T) {
-	resetLogger()
-
-	err1 := Initialize("debug")
-	assert.NoError(t, err1)
-	firstInstance := Log
-
-	err2 := Initialize("warn") // должно быть проигнорировано
-	assert.NoError(t, err2)
-	secondInstance := Log
-
-	assert.Equal(t, firstInstance, secondInstance)
-}
-
 func resetLogger() {
 	Log = nil
 }

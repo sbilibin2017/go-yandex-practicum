@@ -16,49 +16,50 @@ type MetricUpdatePathService interface {
 func MetricUpdatePathHandler(svc MetricUpdatePathService) http.Handler {
 	r := chi.NewRouter()
 	r.Post("/update/{type}/{name}/{value}", func(w http.ResponseWriter, r *http.Request) {
-		metricType := chi.URLParam(r, "type")
-		metricName := chi.URLParam(r, "name")
-		metricValue := chi.URLParam(r, "value")
+		var req types.MetricUpdatePathRequest
+		req.Type = types.MetricType(chi.URLParam(r, "type"))
+		req.Name = chi.URLParam(r, "name")
+		req.Value = chi.URLParam(r, "value")
 
-		if metricType == "" {
+		if req.Type == "" {
 			http.Error(w, "Metric type is required", http.StatusBadRequest)
 			return
 		}
 
-		if metricName == "" {
+		if req.Name == "" {
 			http.Error(w, "Metric name is required", http.StatusNotFound)
 			return
 		}
 
-		if metricValue == "" {
+		if req.Value == "" {
 			http.Error(w, "Metric value is required", http.StatusBadRequest)
 			return
 		}
 
 		var metrics []types.Metrics
 
-		if metricType == string(types.CounterMetricType) {
-			delta, err := strconv.ParseInt(metricValue, 10, 64)
+		if req.Type == types.CounterMetricType {
+			delta, err := strconv.ParseInt(req.Value, 10, 64)
 			if err != nil {
 				http.Error(w, "Invalid metric value for counter", http.StatusBadRequest)
 				return
 			}
 			metrics = append(metrics, types.Metrics{
 				MetricID: types.MetricID{
-					ID:   metricName,
+					ID:   req.Name,
 					Type: types.CounterMetricType,
 				},
 				Delta: &delta,
 			})
-		} else if metricType == string(types.GaugeMetricType) {
-			val, err := strconv.ParseFloat(metricValue, 64)
+		} else if req.Type == types.GaugeMetricType {
+			val, err := strconv.ParseFloat(req.Value, 64)
 			if err != nil {
 				http.Error(w, "Invalid metric value for gauge", http.StatusBadRequest)
 				return
 			}
 			metrics = append(metrics, types.Metrics{
 				MetricID: types.MetricID{
-					ID:   metricName,
+					ID:   req.Name,
 					Type: types.GaugeMetricType,
 				},
 				Value: &val,
