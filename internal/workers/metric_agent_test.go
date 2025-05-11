@@ -52,6 +52,7 @@ func TestProduceGaugeMetrics(t *testing.T) {
 		m := <-ch
 		assert.Equal(t, types.GaugeMetricType, m["type"])
 		assert.NotEmpty(t, m["name"])
+		assert.Contains(t, m, "value")
 	}
 }
 
@@ -69,14 +70,14 @@ func TestStartMetricAgent(t *testing.T) {
 	defer ctrl.Finish()
 	mockFacade := NewMockMetricFacade(ctrl)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan map[string]any, 100)
 	pollTicker := time.NewTicker(10 * time.Millisecond)
 	reportTicker := time.NewTicker(20 * time.Millisecond)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
 	mockFacade.EXPECT().Update(gomock.Any(), gomock.Any()).AnyTimes()
-	StartMetricAgent(ctx, mockFacade, *pollTicker, *reportTicker)
+	go StartMetricAgent(ctx, mockFacade, ch, *pollTicker, *reportTicker)
+	time.Sleep(100 * time.Millisecond)
+	cancel()
 }

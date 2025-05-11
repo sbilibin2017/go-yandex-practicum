@@ -17,12 +17,10 @@ type MetricFacade interface {
 func StartMetricAgent(
 	ctx context.Context,
 	facade MetricFacade,
+	ch chan map[string]any,
 	pollTicker time.Ticker,
 	reportTicker time.Ticker,
 ) {
-
-	ch := make(chan map[string]any, 1000)
-	defer close(ch)
 
 	for {
 		select {

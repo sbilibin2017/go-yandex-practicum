@@ -27,6 +27,9 @@ func run() error {
 	client := resty.New()
 	metricFacade := facades.NewMetricFacade(*client, flagServerURL)
 
+	metricCh := make(chan map[string]any, 1000)
+	defer close(metricCh)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -35,6 +38,7 @@ func run() error {
 		workers.StartMetricAgent(
 			ctx,
 			metricFacade,
+			metricCh,
 			*pollTicker,
 			*reportTicker,
 		)

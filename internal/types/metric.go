@@ -4,28 +4,16 @@ import (
 	"errors"
 )
 
-type MetricUpdatePathRequest struct {
-	Type  MetricType
-	Name  string
-	Value string
-}
-
-type MetricID struct {
-	ID   string     `json:"id"`
-	Type MetricType `json:"type"`
-}
-
 type Metrics struct {
-	MetricID
-	Value *float64 `json:"value,omitempty"`
-	Delta *int64   `json:"delta,omitempty"`
+	ID    string
+	Type  string
+	Value float64
+	Delta int64
 }
-
-type MetricType string
 
 const (
-	CounterMetricType MetricType = "counter"
-	GaugeMetricType   MetricType = "gauge"
+	CounterMetricType string = "counter"
+	GaugeMetricType   string = "gauge"
 )
 
 var (

@@ -12,7 +12,6 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/repositories"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/services"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func run() error {
@@ -21,14 +20,18 @@ func run() error {
 		return err
 	}
 
-	data := make(map[types.MetricID]types.Metrics)
+	data := make(map[string]any)
+
 	mfo := repositories.NewMetricFilterOneRepository(data)
 	msr := repositories.NewMetricMemorySaveRepository(data)
+
 	service := services.NewMetricUpdateService(mfo, msr)
+
 	handler := handlers.MetricUpdatePathHandler(service)
 
 	router := chi.NewRouter()
-	router.Mount("/", handler)
+	router.Post("/update/{type}/{name}/{value}", handler)
+	router.Post("/update/{type}/{name}", handler)
 
 	server := &http.Server{Addr: flagRunAddress, Handler: router}
 
