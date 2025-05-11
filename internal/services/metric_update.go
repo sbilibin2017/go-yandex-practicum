@@ -6,26 +6,18 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-type MetricUpdateFilterOneRepository interface {
-	FilterOne(ctx context.Context, id types.MetricID) (*types.Metrics, error)
-}
-
-type MetricUpdateSaveRepository interface {
-	Save(ctx context.Context, metrics types.Metrics) error
-}
-
 type MetricUpdateService struct {
-	mfo MetricUpdateFilterOneRepository
-	msr MetricUpdateSaveRepository
+	mfor FilterOneRepository
+	msr  SaveRepository
 }
 
 func NewMetricUpdateService(
-	mfo MetricUpdateFilterOneRepository,
-	msr MetricUpdateSaveRepository,
+	mfor FilterOneRepository,
+	msr SaveRepository,
 ) *MetricUpdateService {
 	return &MetricUpdateService{
-		mfo: mfo,
-		msr: msr,
+		mfor: mfor,
+		msr:  msr,
 	}
 }
 
@@ -33,15 +25,18 @@ func (svc *MetricUpdateService) Update(
 	ctx context.Context, metrics []types.Metrics,
 ) error {
 	for _, metric := range metrics {
-		currentMetric, err := svc.mfo.FilterOne(ctx, metric.MetricID)
+		newMetric := structToMap(metric)
+
+		currentMetric, err := svc.mfor.FilterOne(ctx, newMetric)
 		if err != nil {
 			return types.ErrMetricIsNotUpdated
 		}
+		if currentMetric != nil {
+			strategy := metricUpdateStrategies[metric.Type]
+			newMetric = strategy(currentMetric, newMetric)
+		}
 
-		strategy := metricUpdateStrategies[metric.Type]
-		updatedMetric := strategy(currentMetric, metric)
-
-		err = svc.msr.Save(ctx, updatedMetric)
+		err = svc.msr.Save(ctx, newMetric)
 		if err != nil {
 			return types.ErrMetricIsNotUpdated
 		}
@@ -49,25 +44,22 @@ func (svc *MetricUpdateService) Update(
 	return nil
 }
 
-var metricUpdateStrategies = map[types.MetricType]func(
-	oldValue *types.Metrics, newValue types.Metrics,
-) types.Metrics{
+var metricUpdateStrategies = map[string]func(
+	oldValue map[string]any, newValue map[string]any,
+) map[string]any{
 	types.CounterMetricType: metricUpdateCounter,
 	types.GaugeMetricType:   metricUpdateGauge,
 }
 
 func metricUpdateCounter(
-	oldValue *types.Metrics, newValue types.Metrics,
-) types.Metrics {
-	if oldValue == nil {
-		return newValue
-	}
-	*newValue.Delta = *oldValue.Delta + *newValue.Delta
+	oldValue map[string]any, newValue map[string]any,
+) map[string]any {
+	newValue["delta"] = newValue["delta"].(int64) + oldValue["delta"].(int64)
 	return newValue
 }
 
 func metricUpdateGauge(
-	oldValue *types.Metrics, newValue types.Metrics,
-) types.Metrics {
+	oldValue map[string]any, newValue map[string]any,
+) map[string]any {
 	return newValue
 }

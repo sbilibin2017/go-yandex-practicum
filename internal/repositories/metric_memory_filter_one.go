@@ -3,17 +3,15 @@ package repositories
 import (
 	"context"
 	"sync"
-
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 type MetricFilterOneRepository struct {
-	data map[types.MetricID]types.Metrics
+	data map[string]any
 	mu   sync.RWMutex
 }
 
 func NewMetricFilterOneRepository(
-	data map[types.MetricID]types.Metrics,
+	data map[string]any,
 ) *MetricFilterOneRepository {
 	return &MetricFilterOneRepository{
 		data: data,
@@ -21,13 +19,13 @@ func NewMetricFilterOneRepository(
 }
 
 func (r *MetricFilterOneRepository) FilterOne(
-	ctx context.Context, id types.MetricID,
-) (*types.Metrics, error) {
+	ctx context.Context, filter map[string]any,
+) (map[string]any, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	metric, exists := r.data[id]
+	metric, exists := r.data[generateMetricKey(filter)]
 	if !exists {
 		return nil, nil
 	}
-	return &metric, nil
+	return metric.(map[string]any), nil
 }

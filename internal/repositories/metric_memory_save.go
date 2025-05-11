@@ -3,17 +3,15 @@ package repositories
 import (
 	"context"
 	"sync"
-
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 type MetricMemorySaveRepository struct {
-	data map[types.MetricID]types.Metrics
+	data map[string]any
 	mu   sync.RWMutex
 }
 
 func NewMetricMemorySaveRepository(
-	data map[types.MetricID]types.Metrics,
+	data map[string]any,
 ) *MetricMemorySaveRepository {
 	return &MetricMemorySaveRepository{
 		data: data,
@@ -21,10 +19,10 @@ func NewMetricMemorySaveRepository(
 }
 
 func (r *MetricMemorySaveRepository) Save(
-	ctx context.Context, metrics types.Metrics,
+	ctx context.Context, data map[string]any,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.data[metrics.MetricID] = metrics
+	r.data[generateMetricKey(data)] = data
 	return nil
 }
