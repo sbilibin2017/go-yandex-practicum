@@ -9,80 +9,116 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetricUpdateService_Update_Error_FilterOne(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockFilterOneRepository := NewMockFilterOneRepository(ctrl)
-	mockSaveRepository := NewMockSaveRepository(ctrl)
-	service := NewMetricUpdateService(mockFilterOneRepository, mockSaveRepository)
-	metrics := []types.Metrics{
+func TestMetricUpdateService_Update(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(mockFilterOneRepository *MockMetricUpdateFilterOneRepository, mockSaveRepository *MockMetricUpdateSaveRepository)
+		want  error
+	}{
 		{
-			ID:    "1",
-			Type:  string(types.CounterMetricType),
-			Delta: 10,
+			name: "Error in FilterOne",
+			setup: func(mockFilterOneRepository *MockMetricUpdateFilterOneRepository, mockSaveRepository *MockMetricUpdateSaveRepository) {
+				mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(nil, assert.AnError)
+			},
+			want: types.ErrInternal,
+		},
+		{
+			name: "Error in Save",
+			setup: func(mockFilterOneRepository *MockMetricUpdateFilterOneRepository, mockSaveRepository *MockMetricUpdateSaveRepository) {
+				mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(map[string]any{
+					"type":  "counter",
+					"name":  "HeapAlloc",
+					"delta": int64(5),
+				}, nil)
+				mockSaveRepository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(assert.AnError)
+			},
+			want: types.ErrInternal,
+		},
+		{
+			name: "Success for Gauge",
+			setup: func(mockFilterOneRepository *MockMetricUpdateFilterOneRepository, mockSaveRepository *MockMetricUpdateSaveRepository) {
+				mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(map[string]any{
+					"type":  "counter",
+					"name":  "HeapAlloc",
+					"delta": int64(5),
+				}, nil)
+				mockSaveRepository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil)
+			},
+			want: nil,
 		},
 	}
-	mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(nil, assert.AnError)
-	err := service.Update(context.Background(), metrics)
-	assert.Equal(t, types.ErrMetricIsNotUpdated, err)
-}
 
-func TestMetricUpdateService_Update_Error_Save(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-	mockFilterOneRepository := NewMockFilterOneRepository(ctrl)
-	mockSaveRepository := NewMockSaveRepository(ctrl)
-	service := NewMetricUpdateService(mockFilterOneRepository, mockSaveRepository)
-	metrics := []types.Metrics{
-		{
-			ID:    "1",
-			Type:  string(types.CounterMetricType),
-			Delta: 10,
-		},
-	}
-	mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(map[string]any{
-		"type":  "counter",
-		"name":  "HeapAlloc",
-		"delta": int64(5),
-	}, nil)
-	mockSaveRepository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(assert.AnError)
-	err := service.Update(context.Background(), metrics)
-	assert.Equal(t, types.ErrMetricIsNotUpdated, err)
-}
 
-func TestMetricUpdateService_Update_SuccessGauge(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockFilterOneRepository := NewMockFilterOneRepository(ctrl)
-	mockSaveRepository := NewMockSaveRepository(ctrl)
+	mockFilterOneRepository := NewMockMetricUpdateFilterOneRepository(ctrl)
+	mockSaveRepository := NewMockMetricUpdateSaveRepository(ctrl)
+
 	service := NewMetricUpdateService(mockFilterOneRepository, mockSaveRepository)
-	metrics := []types.Metrics{
-		{
-			ID:    "1",
-			Type:  string(types.CounterMetricType),
-			Delta: 10,
-		},
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setup(mockFilterOneRepository, mockSaveRepository)
+			metrics := []types.Metrics{
+				{
+					ID:    "1",
+					Type:  string(types.CounterMetricType),
+					Delta: 10,
+				},
+			}
+
+			err := service.Update(context.Background(), metrics)
+			if tt.want != nil {
+				assert.Equal(t, tt.want, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
-	mockFilterOneRepository.EXPECT().FilterOne(gomock.Any(), gomock.Any()).Return(map[string]any{
-		"type":  "counter",
-		"name":  "HeapAlloc",
-		"delta": int64(5),
-	}, nil)
-	mockSaveRepository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil)
-	err := service.Update(context.Background(), metrics)
-	assert.NoError(t, err)
 }
 
 func TestMetricUpdateCounter(t *testing.T) {
-	oldValue := map[string]any{"delta": int64(10)}
-	newValue := map[string]any{"delta": int64(5)}
-	result := metricUpdateCounter(oldValue, newValue)
-	assert.Equal(t, int64(15), result["delta"], "Delta должна быть равна 15")
+	tests := []struct {
+		name          string
+		oldValue      map[string]any
+		newValue      map[string]any
+		expectedDelta int64
+	}{
+		{
+			name:          "Successful Counter Update",
+			oldValue:      map[string]any{"delta": int64(10)},
+			newValue:      map[string]any{"delta": int64(5)},
+			expectedDelta: int64(15),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := metricUpdateCounter(tt.oldValue, tt.newValue)
+			assert.Equal(t, tt.expectedDelta, result["delta"], "Delta должна быть равна %d", tt.expectedDelta)
+		})
+	}
 }
 
 func TestMetricUpdateGauge(t *testing.T) {
-	oldValue := map[string]any{"delta": int64(10)}
-	newValue := map[string]any{"delta": int64(5)}
-	result := metricUpdateGauge(oldValue, newValue)
-	assert.Equal(t, newValue, result, "NewValue должна оставаться неизменной")
+	tests := []struct {
+		name          string
+		oldValue      map[string]any
+		newValue      map[string]any
+		expectedValue map[string]any
+	}{
+		{
+			name:          "Successful Gauge Update",
+			oldValue:      map[string]any{"delta": int64(10)},
+			newValue:      map[string]any{"delta": int64(5)},
+			expectedValue: map[string]any{"delta": int64(5)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := metricUpdateGauge(tt.oldValue, tt.newValue)
+			assert.Equal(t, tt.expectedValue, result, "NewValue должна оставаться неизменной")
+		})
+	}
 }

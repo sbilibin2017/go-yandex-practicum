@@ -6,14 +6,22 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+type MetricUpdateFilterOneRepository interface {
+	FilterOne(ctx context.Context, filter map[string]any) (map[string]any, error)
+}
+
+type MetricUpdateSaveRepository interface {
+	Save(ctx context.Context, data map[string]any) error
+}
+
 type MetricUpdateService struct {
-	mfor FilterOneRepository
-	msr  SaveRepository
+	mfor MetricUpdateFilterOneRepository
+	msr  MetricUpdateSaveRepository
 }
 
 func NewMetricUpdateService(
-	mfor FilterOneRepository,
-	msr SaveRepository,
+	mfor MetricUpdateFilterOneRepository,
+	msr MetricUpdateSaveRepository,
 ) *MetricUpdateService {
 	return &MetricUpdateService{
 		mfor: mfor,
@@ -29,7 +37,7 @@ func (svc *MetricUpdateService) Update(
 
 		currentMetric, err := svc.mfor.FilterOne(ctx, newMetric)
 		if err != nil {
-			return types.ErrMetricIsNotUpdated
+			return types.ErrInternal
 		}
 		if currentMetric != nil {
 			strategy := metricUpdateStrategies[metric.Type]
@@ -38,7 +46,7 @@ func (svc *MetricUpdateService) Update(
 
 		err = svc.msr.Save(ctx, newMetric)
 		if err != nil {
-			return types.ErrMetricIsNotUpdated
+			return types.ErrInternal
 		}
 	}
 	return nil
