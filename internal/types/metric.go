@@ -11,11 +11,17 @@ type Metrics struct {
 	Delta int64
 }
 
+type MetricID struct {
+	ID   string
+	Type string
+}
+
 const (
 	CounterMetricType string = "counter"
 	GaugeMetricType   string = "gauge"
 )
 
 var (
-	ErrMetricIsNotUpdated = errors.New("metric is not updated")
+	ErrInternal       = errors.New("internal error")
+	ErrMetricNotFound = errors.New("metric not found")
 )
