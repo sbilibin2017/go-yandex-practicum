@@ -6,16 +6,16 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-type MetricGetFilterOneRepository interface {
-	FilterOne(ctx context.Context, filter map[string]any) (map[string]any, error)
+type MetricGetByIDRepository interface {
+	GetByID(ctx context.Context, id types.MetricID) (*types.Metrics, error)
 }
 
 type MetricGetService struct {
-	mfor MetricGetFilterOneRepository
+	mfor MetricGetByIDRepository
 }
 
 func NewMetricGetService(
-	mfor MetricGetFilterOneRepository,
+	mfor MetricGetByIDRepository,
 ) *MetricGetService {
 	return &MetricGetService{
 		mfor: mfor,
@@ -25,17 +25,12 @@ func NewMetricGetService(
 func (svc *MetricGetService) Get(
 	ctx context.Context, metricID types.MetricID,
 ) (*types.Metrics, error) {
-	filter := structToMap(metricID)
-	currentMetric, err := svc.mfor.FilterOne(ctx, filter)
+	currentMetric, err := svc.mfor.GetByID(ctx, metricID)
 	if err != nil {
-		return nil, types.ErrInternal
+		return nil, types.ErrMetricInternal
 	}
 	if currentMetric == nil {
 		return nil, types.ErrMetricNotFound
 	}
-	metric, err := mapToStruct[types.Metrics](currentMetric)
-	if err != nil {
-		return nil, types.ErrInternal
-	}
-	return &metric, nil
+	return currentMetric, nil
 }

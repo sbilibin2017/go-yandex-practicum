@@ -9,44 +9,45 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	types "github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-// MockMetricUpdateFilterOneRepository is a mock of MetricUpdateFilterOneRepository interface.
-type MockMetricUpdateFilterOneRepository struct {
+// MockMetricUpdateGetByIDRepository is a mock of MetricUpdateGetByIDRepository interface.
+type MockMetricUpdateGetByIDRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricUpdateFilterOneRepositoryMockRecorder
+	recorder *MockMetricUpdateGetByIDRepositoryMockRecorder
 }
 
-// MockMetricUpdateFilterOneRepositoryMockRecorder is the mock recorder for MockMetricUpdateFilterOneRepository.
-type MockMetricUpdateFilterOneRepositoryMockRecorder struct {
-	mock *MockMetricUpdateFilterOneRepository
+// MockMetricUpdateGetByIDRepositoryMockRecorder is the mock recorder for MockMetricUpdateGetByIDRepository.
+type MockMetricUpdateGetByIDRepositoryMockRecorder struct {
+	mock *MockMetricUpdateGetByIDRepository
 }
 
-// NewMockMetricUpdateFilterOneRepository creates a new mock instance.
-func NewMockMetricUpdateFilterOneRepository(ctrl *gomock.Controller) *MockMetricUpdateFilterOneRepository {
-	mock := &MockMetricUpdateFilterOneRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricUpdateFilterOneRepositoryMockRecorder{mock}
+// NewMockMetricUpdateGetByIDRepository creates a new mock instance.
+func NewMockMetricUpdateGetByIDRepository(ctrl *gomock.Controller) *MockMetricUpdateGetByIDRepository {
+	mock := &MockMetricUpdateGetByIDRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricUpdateGetByIDRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricUpdateFilterOneRepository) EXPECT() *MockMetricUpdateFilterOneRepositoryMockRecorder {
+func (m *MockMetricUpdateGetByIDRepository) EXPECT() *MockMetricUpdateGetByIDRepositoryMockRecorder {
 	return m.recorder
 }
 
-// FilterOne mocks base method.
-func (m *MockMetricUpdateFilterOneRepository) FilterOne(ctx context.Context, filter map[string]any) (map[string]any, error) {
+// GetByID mocks base method.
+func (m *MockMetricUpdateGetByIDRepository) GetByID(ctx context.Context, id types.MetricID) (*types.Metrics, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FilterOne", ctx, filter)
-	ret0, _ := ret[0].(map[string]any)
+	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret0, _ := ret[0].(*types.Metrics)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FilterOne indicates an expected call of FilterOne.
-func (mr *MockMetricUpdateFilterOneRepositoryMockRecorder) FilterOne(ctx, filter interface{}) *gomock.Call {
+// GetByID indicates an expected call of GetByID.
+func (mr *MockMetricUpdateGetByIDRepositoryMockRecorder) GetByID(ctx, id interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterOne", reflect.TypeOf((*MockMetricUpdateFilterOneRepository)(nil).FilterOne), ctx, filter)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockMetricUpdateGetByIDRepository)(nil).GetByID), ctx, id)
 }
 
 // MockMetricUpdateSaveRepository is a mock of MetricUpdateSaveRepository interface.
@@ -73,15 +74,15 @@ func (m *MockMetricUpdateSaveRepository) EXPECT() *MockMetricUpdateSaveRepositor
 }
 
 // Save mocks base method.
-func (m *MockMetricUpdateSaveRepository) Save(ctx context.Context, data map[string]any) error {
+func (m *MockMetricUpdateSaveRepository) Save(ctx context.Context, metric types.Metrics) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Save", ctx, data)
+	ret := m.ctrl.Call(m, "Save", ctx, metric)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Save indicates an expected call of Save.
-func (mr *MockMetricUpdateSaveRepositoryMockRecorder) Save(ctx, data interface{}) *gomock.Call {
+func (mr *MockMetricUpdateSaveRepositoryMockRecorder) Save(ctx, metric interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricUpdateSaveRepository)(nil).Save), ctx, data)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricUpdateSaveRepository)(nil).Save), ctx, metric)
 }

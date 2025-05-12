@@ -6,18 +6,69 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetURLParam(t *testing.T) {
-	req, err := http.NewRequest("GET", "/test/123", nil)
+func TestParseURLParam_Success(t *testing.T) {
+	req, err := http.NewRequest("GET", "/update/John/type1/100", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	r.Get("/test/{id}", func(w http.ResponseWriter, r *http.Request) {
-		param := getURLParam(r, "id")
-		assert.Equal(t, "123", param)
+	r.Get("/update/{name}/{type}/{value}", func(w http.ResponseWriter, r *http.Request) {
+		var request types.MetricUpdatePathRequest
+		parseURLParam(r, &request)
+
+		assert.Equal(t, "John", request.Name)
+		assert.Equal(t, "type1", request.Type)
+		assert.Equal(t, "100", request.Value)
+		w.Write([]byte("OK"))
+	})
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestParseURLParam_EmptyParam(t *testing.T) {
+	req, err := http.NewRequest("GET", "/update//type1/100", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := chi.NewRouter()
+	r.Get("/update/{name}/{type}/{value}", func(w http.ResponseWriter, r *http.Request) {
+		var request types.MetricUpdatePathRequest
+		parseURLParam(r, &request)
+
+		assert.Empty(t, request.Name)
+		assert.Equal(t, "type1", request.Type)
+		assert.Equal(t, "100", request.Value)
+		w.Write([]byte("OK"))
+	})
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestParseURLParam_SkipFieldWithoutURLParamTag(t *testing.T) {
+	type TestRequest struct {
+		Name    string `urlparam:"name"`
+		Age     string
+		Country string `urlparam:"country"`
+	}
+	req, err := http.NewRequest("GET", "/update/John//USA", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := chi.NewRouter()
+	r.Get("/update/{name}/{age}/{country}", func(w http.ResponseWriter, r *http.Request) {
+		var request TestRequest
+		parseURLParam(r, &request)
+		assert.Equal(t, "", request.Age)
+		assert.Equal(t, "John", request.Name)
+		assert.Equal(t, "USA", request.Country)
+
+		w.Write([]byte("OK"))
 	})
 	rr := httptest.NewRecorder()
 	r.ServeHTTP(rr, req)

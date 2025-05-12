@@ -1,25 +1,29 @@
-package repositories
+package repositories_test
 
 import (
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/repositories"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func TestMetricMemorySaveRepository_Save(t *testing.T) {
-	initialData := make(map[string]any)
-	repo := NewMetricMemorySaveRepository(initialData)
-	ctx := context.Background()
-	data := map[string]any{
-		"id":    "metric1",
-		"type":  "counter",
-		"delta": int64(10),
+	memStorage := make(map[types.MetricID]types.Metrics)
+	repo := repositories.NewMetricMemorySaveRepository(memStorage)
+	metric := types.Metrics{
+		MetricID: types.MetricID{
+			ID:   "test_metric",
+			Type: types.CounterMetricType,
+		},
+		Delta: func() *int64 { v := int64(42); return &v }(),
 	}
-	err := repo.Save(ctx, data)
-	assert.NoError(t, err)
-	key := generateMetricKey(data)
-	storedData, exists := repo.data[key]
-	assert.True(t, exists, "Data should be saved in the repository")
-	assert.Equal(t, data, storedData, "Saved data should match the input data")
+	err := repo.Save(context.Background(), metric)
+	require.NoError(t, err)
+	savedMetric, exists := memStorage[metric.MetricID]
+	require.True(t, exists, "metric should exist in memory")
+	assert.Equal(t, metric, savedMetric)
 }

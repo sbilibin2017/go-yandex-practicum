@@ -9,42 +9,43 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	types "github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-// MockMetricGetFilterOneRepository is a mock of MetricGetFilterOneRepository interface.
-type MockMetricGetFilterOneRepository struct {
+// MockMetricGetByIDRepository is a mock of MetricGetByIDRepository interface.
+type MockMetricGetByIDRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricGetFilterOneRepositoryMockRecorder
+	recorder *MockMetricGetByIDRepositoryMockRecorder
 }
 
-// MockMetricGetFilterOneRepositoryMockRecorder is the mock recorder for MockMetricGetFilterOneRepository.
-type MockMetricGetFilterOneRepositoryMockRecorder struct {
-	mock *MockMetricGetFilterOneRepository
+// MockMetricGetByIDRepositoryMockRecorder is the mock recorder for MockMetricGetByIDRepository.
+type MockMetricGetByIDRepositoryMockRecorder struct {
+	mock *MockMetricGetByIDRepository
 }
 
-// NewMockMetricGetFilterOneRepository creates a new mock instance.
-func NewMockMetricGetFilterOneRepository(ctrl *gomock.Controller) *MockMetricGetFilterOneRepository {
-	mock := &MockMetricGetFilterOneRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricGetFilterOneRepositoryMockRecorder{mock}
+// NewMockMetricGetByIDRepository creates a new mock instance.
+func NewMockMetricGetByIDRepository(ctrl *gomock.Controller) *MockMetricGetByIDRepository {
+	mock := &MockMetricGetByIDRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricGetByIDRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricGetFilterOneRepository) EXPECT() *MockMetricGetFilterOneRepositoryMockRecorder {
+func (m *MockMetricGetByIDRepository) EXPECT() *MockMetricGetByIDRepositoryMockRecorder {
 	return m.recorder
 }
 
-// FilterOne mocks base method.
-func (m *MockMetricGetFilterOneRepository) FilterOne(ctx context.Context, filter map[string]any) (map[string]any, error) {
+// GetByID mocks base method.
+func (m *MockMetricGetByIDRepository) GetByID(ctx context.Context, id types.MetricID) (*types.Metrics, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FilterOne", ctx, filter)
-	ret0, _ := ret[0].(map[string]any)
+	ret := m.ctrl.Call(m, "GetByID", ctx, id)
+	ret0, _ := ret[0].(*types.Metrics)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FilterOne indicates an expected call of FilterOne.
-func (mr *MockMetricGetFilterOneRepositoryMockRecorder) FilterOne(ctx, filter interface{}) *gomock.Call {
+// GetByID indicates an expected call of GetByID.
+func (mr *MockMetricGetByIDRepositoryMockRecorder) GetByID(ctx, id interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterOne", reflect.TypeOf((*MockMetricGetFilterOneRepository)(nil).FilterOne), ctx, filter)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MockMetricGetByIDRepository)(nil).GetByID), ctx, id)
 }

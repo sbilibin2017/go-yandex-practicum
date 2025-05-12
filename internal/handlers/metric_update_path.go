@@ -12,54 +12,19 @@ type MetricUpdatePathService interface {
 	Update(ctx context.Context, metrics []types.Metrics) error
 }
 
-func MetricUpdatePathHandler(svc MetricUpdatePathService) http.HandlerFunc {
+func MetricUpdatePathHandler(
+	svc MetricUpdatePathService,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		mtype := getURLParam(r, "type")
-		name := getURLParam(r, "name")
-		value := getURLParam(r, "value")
+		var req types.MetricUpdatePathRequest
+		parseURLParam(r, &req)
 
-		if mtype != types.CounterMetricType && mtype != types.GaugeMetricType {
-			http.Error(w, "Invalid metric type", http.StatusBadRequest)
+		var metric types.Metrics
+		if !newMetricFromMetricUpdatePathRequest(w, req, &metric) {
 			return
 		}
 
-		if name == "" {
-			http.Error(w, "Metric name is required", http.StatusNotFound)
-			return
-		}
-
-		if value == "" {
-			http.Error(w, "Metric value is required", http.StatusBadRequest)
-			return
-		}
-
-		var metrics []types.Metrics
-
-		if mtype == types.CounterMetricType {
-			delta, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				http.Error(w, "Invalid metric value for counter", http.StatusBadRequest)
-				return
-			}
-			metrics = append(metrics, types.Metrics{
-				ID:    name,
-				Type:  mtype,
-				Delta: delta,
-			})
-		} else if mtype == types.GaugeMetricType {
-			val, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				http.Error(w, "Invalid metric value for gauge", http.StatusBadRequest)
-				return
-			}
-			metrics = append(metrics, types.Metrics{
-				ID:    name,
-				Type:  mtype,
-				Value: val,
-			})
-		}
-
-		if err := svc.Update(r.Context(), metrics); err != nil {
+		if err := svc.Update(r.Context(), []types.Metrics{metric}); err != nil {
 			http.Error(w, "Metric not updated", http.StatusInternalServerError)
 			return
 		}
@@ -67,4 +32,45 @@ func MetricUpdatePathHandler(svc MetricUpdatePathService) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Metric updated successfully"))
 	}
+}
+
+func newMetricFromMetricUpdatePathRequest(
+	w http.ResponseWriter,
+	req types.MetricUpdatePathRequest,
+	metric *types.Metrics,
+) bool {
+	if req.Name == "" {
+		http.Error(w, "Metric name is required", http.StatusNotFound)
+		return false
+	}
+	metric.ID = req.Name
+
+	if req.Value == "" {
+		http.Error(w, "Metric value is required", http.StatusBadRequest)
+		return false
+	}
+
+	switch req.Type {
+	case string(types.CounterMetricType):
+		delta, err := strconv.ParseInt(req.Value, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid metric value for counter", http.StatusBadRequest)
+			return false
+		}
+		metric.Delta = &delta
+		metric.Type = types.CounterMetricType
+	case string(types.GaugeMetricType):
+		value, err := strconv.ParseFloat(req.Value, 64)
+		if err != nil {
+			http.Error(w, "Invalid metric value for gauge", http.StatusBadRequest)
+			return false
+		}
+		metric.Value = &value
+		metric.Type = types.GaugeMetricType
+	default:
+		http.Error(w, "Invalid metric type", http.StatusBadRequest)
+		return false
+	}
+
+	return true
 }

@@ -1,4 +1,4 @@
-package facades
+package facades_test
 
 import (
 	"context"
@@ -8,54 +8,81 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-func TestMetricFacade_Update_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPath := "/update/gauge/CPU/99.5"
-		assert.Equal(t, expectedPath, r.URL.Path)
-		assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-	client := resty.New()
-	mf := NewMetricFacade(*client, server.URL)
-	metric := map[string]any{
-		"type":  "gauge",
-		"name":  "CPU",
-		"value": "99.5",
+func TestMetricFacade_Update(t *testing.T) {
+	tests := []struct {
+		name            string
+		serverHandler   http.HandlerFunc
+		request         types.MetricUpdatePathRequest
+		serverURL       string
+		expectError     bool
+		expectedErrPart string
+	}{
+		{
+			name: "Success response",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/update/gauge/CPU/99.5", r.URL.Path)
+				assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+				w.WriteHeader(http.StatusOK)
+			},
+			request: types.MetricUpdatePathRequest{
+				Type:  "gauge",
+				Name:  "CPU",
+				Value: "99.5",
+			},
+			expectError: false,
+		},
+		{
+			name: "Server returns error response",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "bad request", http.StatusBadRequest)
+			},
+			request: types.MetricUpdatePathRequest{
+				Type:  "counter",
+				Name:  "Requests",
+				Value: "10",
+			},
+			expectError:     true,
+			expectedErrPart: "error response from server",
+		},
+		{
+			name:            "Request error due to bad URL",
+			serverHandler:   nil,
+			request:         types.MetricUpdatePathRequest{Type: "counter", Name: "Errors", Value: "5"},
+			serverURL:       "http://invalid-host",
+			expectError:     true,
+			expectedErrPart: "failed to send metric",
+		},
 	}
-	err := mf.Update(context.Background(), metric)
-	assert.NoError(t, err)
-}
 
-func TestMetricFacade_Update_ErrorFromServer(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "bad request", http.StatusBadRequest)
-	}))
-	defer server.Close()
-	client := resty.New()
-	mf := NewMetricFacade(*client, server.URL)
-	metric := map[string]any{
-		"type":  "counter",
-		"name":  "Requests",
-		"value": "10",
-	}
-	err := mf.Update(context.Background(), metric)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "error response from server")
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var serverURL string
+			if tt.serverHandler != nil {
+				server := httptest.NewServer(tt.serverHandler)
+				defer server.Close()
+				serverURL = server.URL
+			} else {
+				serverURL = tt.serverURL
+			}
 
-func TestMetricFacade_Update_RequestError(t *testing.T) {
-	client := resty.New()
-	mf := NewMetricFacade(*client, "http://invalid-host")
-	metric := map[string]any{
-		"type":  "counter",
-		"name":  "Errors",
-		"value": "5",
+			client := resty.New()
+			facade := facades.NewMetricFacade(*client, serverURL)
+
+			err := facade.Update(context.Background(), tt.request)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.expectedErrPart != "" {
+					assert.Contains(t, err.Error(), tt.expectedErrPart)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
-	err := mf.Update(context.Background(), metric)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to send metric")
 }

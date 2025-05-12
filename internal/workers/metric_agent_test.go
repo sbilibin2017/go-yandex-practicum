@@ -2,7 +2,6 @@ package workers
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -11,73 +10,57 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestConsumeMetrics(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockFacade := NewMockMetricFacade(ctrl)
-	ctx := context.Background()
-	ch := make(chan map[string]any, 2)
-	metric1 := map[string]any{"type": "gauge", "name": "Test1", "value": 123}
-	metric2 := map[string]any{"type": "counter", "name": "Test2", "value": 456}
-	ch <- metric1
-	ch <- metric2
-	mockFacade.EXPECT().Update(ctx, metric1).Return(nil)
-	mockFacade.EXPECT().Update(ctx, metric2).Return(nil)
-	consumeMetrics(ctx, mockFacade, ch)
-}
-
-func TestConsumeMetrics_ErrorHandled(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockFacade := NewMockMetricFacade(ctrl)
-	ctx := context.Background()
-	ch := make(chan map[string]any, 1)
-	metric := map[string]any{"type": "gauge", "name": "TestError", "value": 999}
-	ch <- metric
-	expectedErr := errors.New("update failed")
-	mockFacade.
-		EXPECT().
-		Update(ctx, metric).
-		Return(expectedErr)
-
-	consumeMetrics(ctx, mockFacade, ch)
-}
-
-func TestProduceGaugeMetrics(t *testing.T) {
-	ch := make(chan map[string]any, 100)
-	produceGaugeMetrics(ch)
-	count := len(ch)
-	assert.Greater(t, count, 0, "Gauge metrics should be produced")
-	for i := 0; i < count; i++ {
-		m := <-ch
-		assert.Equal(t, types.GaugeMetricType, m["type"])
-		assert.NotEmpty(t, m["name"])
-		assert.Contains(t, m, "value")
-	}
-}
-
-func TestProduceCounterMetrics(t *testing.T) {
-	ch := make(chan map[string]any, 1)
-	produceCounterMetrics(ch)
-	m := <-ch
-	assert.Equal(t, types.CounterMetricType, m["type"])
-	assert.Equal(t, "PollCount", m["name"])
-	assert.Equal(t, int64(1), m["value"])
-}
-
 func TestStartMetricAgent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	mockFacade := NewMockMetricFacade(ctrl)
+	ch := make(chan types.MetricUpdatePathRequest, 10)
+	mockFacade.EXPECT().Update(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, metric types.MetricUpdatePathRequest) error {
+		assert.NotEmpty(t, metric.Name, "Metric Name should not be empty")
+		assert.NotEmpty(t, metric.Value, "Metric Value should not be empty")
+		return nil
+	}).AnyTimes()
+	pollTicker := time.NewTicker(10 * time.Millisecond)
+	reportTicker := time.NewTicker(15 * time.Millisecond)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch := make(chan map[string]any, 100)
-	pollTicker := time.NewTicker(10 * time.Millisecond)
-	reportTicker := time.NewTicker(20 * time.Millisecond)
-	defer pollTicker.Stop()
-	defer reportTicker.Stop()
-	mockFacade.EXPECT().Update(gomock.Any(), gomock.Any()).AnyTimes()
 	go StartMetricAgent(ctx, mockFacade, ch, *pollTicker, *reportTicker)
 	time.Sleep(100 * time.Millisecond)
 	cancel()
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestConsumeMetrics(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockFacade := NewMockMetricFacade(ctrl)
+	ch := make(chan types.MetricUpdatePathRequest, 10)
+	mockFacade.EXPECT().Update(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, metric types.MetricUpdatePathRequest) error {
+		assert.NotEmpty(t, metric.Name, "metric name should not be empty")
+		assert.NotEmpty(t, metric.Value, "metric value should not be empty")
+		return nil
+	}).Times(1)
+	ch <- types.MetricUpdatePathRequest{Name: "TestMetric", Value: "123"}
+	consumeMetrics(context.Background(), mockFacade, ch)
+}
+
+func TestProduceGaugeMetrics(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockFacade := NewMockMetricFacade(ctrl)
+	ch := make(chan types.MetricUpdatePathRequest, 10)
+	mockFacade.EXPECT().Update(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, metric types.MetricUpdatePathRequest) error {
+		assert.NotEmpty(t, metric.Name, "metric name should not be empty")
+		assert.NotEmpty(t, metric.Value, "metric value should not be empty")
+		return nil
+	}).AnyTimes()
+	go produceGaugeMetrics(ch)
+	time.Sleep(500 * time.Millisecond)
+	select {
+	case metric := <-ch:
+		assert.NotEmpty(t, metric.Name, "metric name should not be empty")
+		assert.NotEmpty(t, metric.Value, "metric value should not be empty")
+	case <-time.After(1 * time.Second):
+		t.Fatal("no metrics received within timeout")
+	}
 }

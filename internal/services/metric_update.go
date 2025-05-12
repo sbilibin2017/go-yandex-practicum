@@ -6,21 +6,21 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-type MetricUpdateFilterOneRepository interface {
-	FilterOne(ctx context.Context, filter map[string]any) (map[string]any, error)
+type MetricUpdateGetByIDRepository interface {
+	GetByID(ctx context.Context, id types.MetricID) (*types.Metrics, error)
 }
 
 type MetricUpdateSaveRepository interface {
-	Save(ctx context.Context, data map[string]any) error
+	Save(ctx context.Context, metric types.Metrics) error
 }
 
 type MetricUpdateService struct {
-	mfor MetricUpdateFilterOneRepository
+	mfor MetricUpdateGetByIDRepository
 	msr  MetricUpdateSaveRepository
 }
 
 func NewMetricUpdateService(
-	mfor MetricUpdateFilterOneRepository,
+	mfor MetricUpdateGetByIDRepository,
 	msr MetricUpdateSaveRepository,
 ) *MetricUpdateService {
 	return &MetricUpdateService{
@@ -33,41 +33,42 @@ func (svc *MetricUpdateService) Update(
 	ctx context.Context, metrics []types.Metrics,
 ) error {
 	for _, metric := range metrics {
-		newMetric := structToMap(metric)
-
-		currentMetric, err := svc.mfor.FilterOne(ctx, newMetric)
+		currentMetric, err := svc.mfor.GetByID(ctx, metric.MetricID)
 		if err != nil {
-			return types.ErrInternal
+			return types.ErrMetricInternal
 		}
 		if currentMetric != nil {
-			strategy := metricUpdateStrategies[metric.Type]
-			newMetric = strategy(currentMetric, newMetric)
+			strategy, ok := metricUpdateStrategies[metric.Type]
+			if !ok {
+				return types.ErrMetricInternal
+			}
+			metric = strategy(*currentMetric, metric)
 		}
 
-		err = svc.msr.Save(ctx, newMetric)
+		err = svc.msr.Save(ctx, metric)
 		if err != nil {
-			return types.ErrInternal
+			return types.ErrMetricInternal
 		}
 	}
 	return nil
 }
 
-var metricUpdateStrategies = map[string]func(
-	oldValue map[string]any, newValue map[string]any,
-) map[string]any{
+var metricUpdateStrategies = map[types.MetricType]func(
+	oldValue types.Metrics, newValue types.Metrics,
+) types.Metrics{
 	types.CounterMetricType: metricUpdateCounter,
 	types.GaugeMetricType:   metricUpdateGauge,
 }
 
 func metricUpdateCounter(
-	oldValue map[string]any, newValue map[string]any,
-) map[string]any {
-	newValue["delta"] = newValue["delta"].(int64) + oldValue["delta"].(int64)
+	oldValue types.Metrics, newValue types.Metrics,
+) types.Metrics {
+	*newValue.Delta += *oldValue.Delta
 	return newValue
 }
 
 func metricUpdateGauge(
-	oldValue map[string]any, newValue map[string]any,
-) map[string]any {
+	oldValue types.Metrics, newValue types.Metrics,
+) types.Metrics {
 	return newValue
 }

@@ -11,91 +11,67 @@ import (
 
 func TestMetricListAllService_ListAll(t *testing.T) {
 	tests := []struct {
-		name           string
-		mockSetup      func(mockRepo *MockMetricListAllRepository)
-		expectedResult []types.Metrics
-		isErr          bool
+		name     string
+		setup    func(mockRepo *MockMetricListAllRepository)
+		expected []types.Metrics
+		err      error
 	}{
 		{
-			name: "Success - Metrics Found",
-			mockSetup: func(mockRepo *MockMetricListAllRepository) {
-				mockRepo.EXPECT().ListAll(gomock.Any()).Return([]map[string]any{
-					{
-						"id":    "1",
-						"type":  "counter",
-						"value": 10.0,
-						"delta": int64(5),
-					},
-					{
-						"id":    "2",
-						"type":  "gauge",
-						"value": 20.5,
-						"delta": int64(10),
-					},
-				}, nil)
+			name: "Success - returns metrics list",
+			setup: func(mockRepo *MockMetricListAllRepository) {
+				val := float64(42.0)
+				mockRepo.EXPECT().
+					ListAll(context.Background()).
+					Return([]types.Metrics{
+						{
+							MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
+							Value:    &val,
+						},
+					}, nil)
 			},
-			expectedResult: []types.Metrics{
+			expected: []types.Metrics{
 				{
-					ID:    "1",
-					Type:  "counter",
-					Value: 10.0,
-					Delta: 5,
-				},
-				{
-					ID:    "2",
-					Type:  "gauge",
-					Value: 20.5,
-					Delta: 10,
+					MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
+					Value:    func() *float64 { v := 42.0; return &v }(),
 				},
 			},
-			isErr: false,
+			err: nil,
 		},
 		{
-			name: "Success - No Metrics Found",
-			mockSetup: func(mockRepo *MockMetricListAllRepository) {
-				mockRepo.EXPECT().ListAll(gomock.Any()).Return(nil, nil)
+			name: "Empty list - returns nil, nil",
+			setup: func(mockRepo *MockMetricListAllRepository) {
+				mockRepo.EXPECT().
+					ListAll(context.Background()).
+					Return([]types.Metrics{}, nil)
 			},
-			expectedResult: nil,
-			isErr:          false,
+			expected: nil,
+			err:      nil,
 		},
 		{
-			name: "Error - Repository Error",
-			mockSetup: func(mockRepo *MockMetricListAllRepository) {
-				mockRepo.EXPECT().ListAll(gomock.Any()).Return(nil, types.ErrInternal)
+			name: "Repository error - returns ErrMetricInternal",
+			setup: func(mockRepo *MockMetricListAllRepository) {
+				mockRepo.EXPECT().
+					ListAll(context.Background()).
+					Return(nil, assert.AnError)
 			},
-			expectedResult: nil,
-			isErr:          true,
-		},
-		{
-			name: "Error - Failed to Map to Struct",
-			mockSetup: func(mockRepo *MockMetricListAllRepository) {
-				mockRepo.EXPECT().ListAll(gomock.Any()).Return([]map[string]any{
-					{
-						"id":    "1",
-						"type":  "counter",
-						"value": "invalid",
-						"delta": int64(5),
-					},
-				}, nil)
-			},
-			expectedResult: nil,
-			isErr:          true,
+			expected: nil,
+			err:      types.ErrMetricInternal,
 		},
 	}
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
 			mockRepo := NewMockMetricListAllRepository(ctrl)
-			tt.mockSetup(mockRepo)
-			service := NewMetricListAllService(mockRepo)
-			result, err := service.ListAll(context.Background())
-			if tt.isErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-			assert.Equal(t, tt.expectedResult, result)
+			tt.setup(mockRepo)
+
+			svc := NewMetricListAllService(mockRepo)
+			result, err := svc.ListAll(context.Background())
+
+			assert.Equal(t, tt.err, err)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

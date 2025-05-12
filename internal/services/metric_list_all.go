@@ -7,7 +7,7 @@ import (
 )
 
 type MetricListAllRepository interface {
-	ListAll(ctx context.Context) ([]map[string]any, error)
+	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
 type MetricListAllService struct {
@@ -27,14 +27,10 @@ func (svc *MetricListAllService) ListAll(
 ) ([]types.Metrics, error) {
 	metrics, err := svc.mlar.ListAll(ctx)
 	if err != nil {
-		return nil, types.ErrInternal
+		return nil, types.ErrMetricInternal
 	}
 	if len(metrics) == 0 {
 		return nil, nil
 	}
-	metricsStruct, err := mapSliceToStructSlice[types.Metrics](metrics)
-	if err != nil {
-		return nil, err
-	}
-	return metricsStruct, nil
+	return metrics, nil
 }
