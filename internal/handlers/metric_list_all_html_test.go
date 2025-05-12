@@ -23,8 +23,8 @@ func TestMetricListAllHTMLHandler(t *testing.T) {
 		{
 			name: "success with gauge and counter",
 			mockMetrics: []types.Metrics{
-				*types.NewMetrics("temperature", string(types.GaugeMetricType), nil, floatPtr(21.5)),
-				*types.NewMetrics("requests", string(types.CounterMetricType), intPtr(42), nil),
+				{MetricID: types.MetricID{ID: "temperature", Type: types.GaugeMetricType}, Value: floatPtr(21.5)},
+				{MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType}, Delta: intPtr(42)},
 			},
 			mockErr:        nil,
 			expectedStatus: http.StatusOK,
