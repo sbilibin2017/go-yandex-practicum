@@ -11,7 +11,7 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	flagRunAddress = ":8080"
+	flagServerAddress = ":8080"
 	flagLogLevel = "info"
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGINT)

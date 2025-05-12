@@ -11,7 +11,7 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	flagServerURL = "http://localhost:8080"
+	flagServerAddress = "http://localhost:8080"
 	flagPollInterval = 1
 	flagReportInterval = 1
 	flagLogLevel = "info"

@@ -21,17 +21,6 @@ type Metrics struct {
 	Delta *int64
 }
 
-func NewMetrics(id string, mtype string, delta *int64, value *float64) *Metrics {
-	return &Metrics{
-		MetricID: MetricID{
-			ID:   id,
-			Type: MetricType(mtype),
-		},
-		Delta: delta,
-		Value: value,
-	}
-}
-
 type MetricID struct {
 	ID   string
 	Type MetricType

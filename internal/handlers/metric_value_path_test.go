@@ -29,14 +29,14 @@ func TestMetricGetPathHandler_WithRouter(t *testing.T) {
 			name:           "Gauge metric success",
 			mtype:          "gauge",
 			metricName:     "temperature",
-			mockReturn:     types.NewMetrics("temperature", "gauge", nil, floatPtr(23.5)),
+			mockReturn:     &types.Metrics{MetricID: types.MetricID{ID: "temperature", Type: types.GaugeMetricType}, Value: floatPtr(23.5)},
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "Counter metric success",
 			mtype:          "counter",
 			metricName:     "requests",
-			mockReturn:     types.NewMetrics("requests", "counter", int64Ptr(101), nil),
+			mockReturn:     &types.Metrics{MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType}, Delta: int64Ptr(101)},
 			expectedStatus: http.StatusOK,
 		},
 		{

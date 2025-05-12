@@ -50,13 +50,13 @@ func run() error {
 	router.Get("/value/{type}/{name}", metricGetHandler)
 	router.Get("/", metricListAllHandler)
 
-	server := &http.Server{Addr: flagRunAddress, Handler: router}
+	server := &http.Server{Addr: flagServerAddress, Handler: router}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		logger.Log.Info("Starting server", zap.String("address", flagRunAddress))
+		logger.Log.Info("Starting server", zap.String("address", flagServerAddress))
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Log.Error("Server failed to start", zap.Error(err))
 		}

@@ -3,6 +3,7 @@ package facades
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
@@ -16,6 +17,9 @@ func NewMetricFacade(
 	client resty.Client,
 	flagServerURL string,
 ) *MetricFacade {
+	if !strings.HasPrefix(flagServerURL, "http://") && !strings.HasPrefix(flagServerURL, "https://") {
+		flagServerURL = "http://" + flagServerURL
+	}
 	return &MetricFacade{client: *client.SetBaseURL(flagServerURL)}
 }
 
