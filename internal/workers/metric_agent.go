@@ -37,12 +37,12 @@ func NewMetricAgent(
 	}
 }
 
-func (ma *MetricAgent) Start(ctx context.Context) {
+func (ma *MetricAgent) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Log.Info("Context done, stopping metric agent.")
-			return
+			return nil
 		case <-ma.pollTicker.C:
 			logger.Log.Info("Polling metrics...")
 			produceGaugeMetrics(ma.metricCh)

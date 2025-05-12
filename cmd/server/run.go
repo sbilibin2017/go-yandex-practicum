@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/apps"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/server"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
@@ -23,7 +23,7 @@ func run() error {
 
 	router := chi.NewRouter()
 
-	srv := &http.Server{Addr: flagServerAddress}
+	server := &http.Server{Addr: flagServerAddress}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -32,9 +32,8 @@ func run() error {
 		ctx,
 		metricsMap,
 		router,
-		srv,
+		server,
 	)
 
-	return server.Run(ctx, srv)
-
+	return runners.RunServer(ctx, server)
 }

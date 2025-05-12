@@ -9,6 +9,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/apps"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
@@ -40,14 +41,5 @@ func run() error {
 		reportTicker,
 	)
 
-	go func() {
-		logger.Log.Info("Starting Metric Agent...")
-		metricAgent.Start(ctx)
-	}()
-
-	<-ctx.Done()
-
-	logger.Log.Info("Shutting down Metric Agent...")
-
-	return nil
+	return runners.RunWorker(ctx, metricAgent)
 }
