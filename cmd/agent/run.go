@@ -26,7 +26,7 @@ func run() error {
 	defer reportTicker.Stop()
 
 	client := resty.New()
-	metricFacade := facades.NewMetricFacade(*client, flagServerURL)
+	metricFacade := facades.NewMetricFacade(*client, flagServerAddress)
 
 	metricCh := make(chan types.MetricUpdatePathRequest, 1000)
 	defer close(metricCh)
