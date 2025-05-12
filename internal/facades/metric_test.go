@@ -7,10 +7,9 @@ import (
 	"testing"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMetricFacade_Update(t *testing.T) {
@@ -53,7 +52,7 @@ func TestMetricFacade_Update(t *testing.T) {
 			name:            "Request error due to bad URL",
 			serverHandler:   nil,
 			request:         types.MetricUpdatePathRequest{Type: "counter", Name: "Errors", Value: "5"},
-			serverURL:       "http://invalid-host",
+			serverURL:       "http://invalid-host.local", // должен быть некорректен
 			expectError:     true,
 			expectedErrPart: "failed to send metric",
 		},
@@ -61,17 +60,17 @@ func TestMetricFacade_Update(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var serverURL string
+			serverURL := tt.serverURL
+
+			var server *httptest.Server
 			if tt.serverHandler != nil {
-				server := httptest.NewServer(tt.serverHandler)
+				server = httptest.NewServer(tt.serverHandler)
 				defer server.Close()
 				serverURL = server.URL
-			} else {
-				serverURL = tt.serverURL
 			}
 
-			client := resty.New()
-			facade := facades.NewMetricFacade(*client, serverURL)
+			client := *resty.New()
+			facade := facades.NewMetricFacade(client, serverURL)
 
 			err := facade.Update(context.Background(), tt.request)
 

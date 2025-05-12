@@ -59,7 +59,7 @@ func TestMetricListAllHTMLHandler(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			rr := httptest.NewRecorder()
 
-			handler := MetricListAllHTMLHandler(mockService)
+			handler := NewMetricListAllHTMLHandler(mockService)
 			handler.ServeHTTP(rr, req)
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)

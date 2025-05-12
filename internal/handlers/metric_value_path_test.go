@@ -81,7 +81,7 @@ func TestMetricGetPathHandler_WithRouter(t *testing.T) {
 					Times(1)
 			}
 
-			handler := handlers.MetricGetPathHandler(mockService)
+			handler := handlers.NewMetricGetPathHandler(mockService)
 
 			router := chi.NewRouter()
 			router.Get("/value/{type}/{name}", handler)

@@ -15,12 +15,13 @@ type MetricFacade struct {
 
 func NewMetricFacade(
 	client resty.Client,
-	flagServerURL string,
+	flagServerAddress string,
 ) *MetricFacade {
-	if !strings.HasPrefix(flagServerURL, "http://") && !strings.HasPrefix(flagServerURL, "https://") {
-		flagServerURL = "http://" + flagServerURL
+	if !strings.HasPrefix(flagServerAddress, "http://") && !strings.HasPrefix(flagServerAddress, "https://") {
+		flagServerAddress = "http://" + flagServerAddress
 	}
-	return &MetricFacade{client: *client.SetBaseURL(flagServerURL)}
+	client.SetBaseURL(flagServerAddress)
+	return &MetricFacade{client: client}
 }
 
 func (mf *MetricFacade) Update(

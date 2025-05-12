@@ -12,7 +12,7 @@ type MetricUpdatePathService interface {
 	Update(ctx context.Context, metrics []types.Metrics) error
 }
 
-func MetricUpdatePathHandler(
+func NewMetricUpdatePathHandler(
 	svc MetricUpdatePathService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
