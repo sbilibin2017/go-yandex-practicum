@@ -12,7 +12,7 @@ type MetricListAllHTMLService interface {
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
-func MetricListAllHTMLHandler(svc MetricListAllHTMLService) http.HandlerFunc {
+func NewMetricListAllHTMLHandler(svc MetricListAllHTMLService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		metrics, err := svc.ListAll(r.Context())
 		if err != nil {

@@ -121,7 +121,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 					Times(1)
 			}
 
-			handler := MetricUpdatePathHandler(mockService)
+			handler := NewMetricUpdatePathHandler(mockService)
 
 			router := chi.NewRouter()
 			router.Post("/update/{type}/{name}/{value}", handler)

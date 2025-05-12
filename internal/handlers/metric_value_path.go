@@ -12,7 +12,7 @@ type MetricGetPathService interface {
 	Get(ctx context.Context, metricID types.MetricID) (*types.Metrics, error)
 }
 
-func MetricGetPathHandler(
+func NewMetricGetPathHandler(
 	svc MetricGetPathService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
