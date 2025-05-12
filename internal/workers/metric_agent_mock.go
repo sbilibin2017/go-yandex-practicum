@@ -9,6 +9,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	types "github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 // MockMetricFacade is a mock of MetricFacade interface.
@@ -35,7 +36,7 @@ func (m *MockMetricFacade) EXPECT() *MockMetricFacadeMockRecorder {
 }
 
 // Update mocks base method.
-func (m *MockMetricFacade) Update(ctx context.Context, metric map[string]any) error {
+func (m *MockMetricFacade) Update(ctx context.Context, metric types.MetricUpdatePathRequest) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Update", ctx, metric)
 	ret0, _ := ret[0].(error)

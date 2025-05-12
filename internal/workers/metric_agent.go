@@ -4,34 +4,36 @@ import (
 	"context"
 	"math/rand"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	"go.uber.org/zap"
 )
 
 type MetricFacade interface {
-	Update(ctx context.Context, metric map[string]any) error
+	Update(ctx context.Context, metric types.MetricUpdatePathRequest) error
 }
 
 func StartMetricAgent(
 	ctx context.Context,
 	facade MetricFacade,
-	ch chan map[string]any,
+	ch chan types.MetricUpdatePathRequest,
 	pollTicker time.Ticker,
 	reportTicker time.Ticker,
 ) {
-
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Log.Info("Context done, stopping metric agent.")
 			return
 		case <-pollTicker.C:
-			logger.Log.Info("polling metrics...")
+			logger.Log.Info("Polling metrics...")
 			produceGaugeMetrics(ch)
 			produceCounterMetrics(ch)
 		case <-reportTicker.C:
-			logger.Log.Info("reporting metrics...")
+			logger.Log.Info("Reporting metrics...")
 			consumeMetrics(ctx, facade, ch)
 		}
 	}
@@ -40,55 +42,62 @@ func StartMetricAgent(
 func consumeMetrics(
 	ctx context.Context,
 	handler MetricFacade,
-	ch chan map[string]any,
+	ch chan types.MetricUpdatePathRequest,
 ) {
 	for {
 		select {
 		case m := <-ch:
+			logger.Log.Info("Consuming metric", zap.String("name", m.Name), zap.String("type", m.Type), zap.String("value", m.Value))
 			err := handler.Update(ctx, m)
 			if err != nil {
-				logger.Log.Error(err)
+				logger.Log.Error("Error updating metric", zap.String("name", m.Name), zap.Error(err))
+			} else {
+				logger.Log.Info("Successfully updated metric", zap.String("name", m.Name))
 			}
 		default:
+			logger.Log.Debug("No metrics to consume.")
 			return
 		}
 	}
 }
 
-func produceGaugeMetrics(ch chan map[string]any) {
+func produceGaugeMetrics(ch chan types.MetricUpdatePathRequest) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "Alloc", "value": float64(memStats.Alloc)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "BuckHashSys", "value": float64(memStats.BuckHashSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "Frees", "value": float64(memStats.Frees)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "GCCPUFraction", "value": float64(memStats.GCCPUFraction)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "GCSys", "value": float64(memStats.GCSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapAlloc", "value": float64(memStats.HeapAlloc)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapIdle", "value": float64(memStats.HeapIdle)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapInuse", "value": float64(memStats.HeapInuse)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapObjects", "value": float64(memStats.HeapObjects)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapReleased", "value": float64(memStats.HeapReleased)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "HeapSys", "value": float64(memStats.HeapSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "LastGC", "value": float64(memStats.LastGC)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "Lookups", "value": float64(memStats.Lookups)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "MCacheInuse", "value": float64(memStats.MCacheInuse)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "MCacheSys", "value": float64(memStats.MCacheSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "MSpanInuse", "value": float64(memStats.MSpanInuse)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "MSpanSys", "value": float64(memStats.MSpanSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "Mallocs", "value": float64(memStats.Mallocs)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "NextGC", "value": float64(memStats.NextGC)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "NumForcedGC", "value": float64(memStats.NumForcedGC)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "NumGC", "value": float64(memStats.NumGC)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "OtherSys", "value": float64(memStats.OtherSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "PauseTotalNs", "value": float64(memStats.PauseTotalNs)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "StackInuse", "value": float64(memStats.StackInuse)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "StackSys", "value": float64(memStats.StackSys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "Sys", "value": float64(memStats.Sys)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "TotalAlloc", "value": float64(memStats.TotalAlloc)}
-	ch <- map[string]any{"type": types.GaugeMetricType, "name": "RandomValue", "value": float64(rand.Float64())}
+	logger.Log.Info("Producing gauge metrics...")
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Alloc", Value: strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "BuckHashSys", Value: strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Frees", Value: strconv.FormatFloat(float64(memStats.Frees), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "GCCPUFraction", Value: strconv.FormatFloat(memStats.GCCPUFraction, 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "GCSys", Value: strconv.FormatFloat(float64(memStats.GCSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapAlloc", Value: strconv.FormatFloat(float64(memStats.HeapAlloc), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapIdle", Value: strconv.FormatFloat(float64(memStats.HeapIdle), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapInuse", Value: strconv.FormatFloat(float64(memStats.HeapInuse), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapObjects", Value: strconv.FormatFloat(float64(memStats.HeapObjects), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapReleased", Value: strconv.FormatFloat(float64(memStats.HeapReleased), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapSys", Value: strconv.FormatFloat(float64(memStats.HeapSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "LastGC", Value: strconv.FormatFloat(float64(memStats.LastGC), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Lookups", Value: strconv.FormatFloat(float64(memStats.Lookups), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MCacheInuse", Value: strconv.FormatFloat(float64(memStats.MCacheInuse), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MCacheSys", Value: strconv.FormatFloat(float64(memStats.MCacheSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MSpanInuse", Value: strconv.FormatFloat(float64(memStats.MSpanInuse), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MSpanSys", Value: strconv.FormatFloat(float64(memStats.MSpanSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Mallocs", Value: strconv.FormatFloat(float64(memStats.Mallocs), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NextGC", Value: strconv.FormatFloat(float64(memStats.NextGC), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NumForcedGC", Value: strconv.FormatFloat(float64(memStats.NumForcedGC), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NumGC", Value: strconv.FormatFloat(float64(memStats.NumGC), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "OtherSys", Value: strconv.FormatFloat(float64(memStats.OtherSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "PauseTotalNs", Value: strconv.FormatFloat(float64(memStats.PauseTotalNs), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "StackInuse", Value: strconv.FormatFloat(float64(memStats.StackInuse), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "StackSys", Value: strconv.FormatFloat(float64(memStats.StackSys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Sys", Value: strconv.FormatFloat(float64(memStats.Sys), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "TotalAlloc", Value: strconv.FormatFloat(float64(memStats.TotalAlloc), 'f', -1, 64)}
+	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "RandomValue", Value: strconv.FormatFloat(rand.Float64(), 'f', -1, 64)}
+	logger.Log.Info("Gauge metrics produced.")
 }
 
-func produceCounterMetrics(ch chan map[string]any) {
-	ch <- map[string]any{"type": types.CounterMetricType, "name": "PollCount", "value": int64(1)}
+func produceCounterMetrics(ch chan types.MetricUpdatePathRequest) {
+	logger.Log.Info("Producing counter metrics...")
+	ch <- types.MetricUpdatePathRequest{Type: string(types.CounterMetricType), Name: "PollCount", Value: "1"}
+	logger.Log.Info("Counter metrics produced.")
 }

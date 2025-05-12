@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 type MetricFacade struct {
@@ -19,17 +20,17 @@ func NewMetricFacade(
 }
 
 func (mf *MetricFacade) Update(
-	ctx context.Context, metric map[string]any,
+	ctx context.Context, req types.MetricUpdatePathRequest,
 ) error {
-	url := fmt.Sprintf("/update/%s/%s/%s", metric["type"], metric["name"], fmt.Sprint(metric["value"]))
+	url := fmt.Sprintf("/update/%s/%s/%s", req.Type, req.Name, req.Value)
 	resp, err := mf.client.R().
 		SetHeader("Content-Type", "text/plain").
 		Post(url)
 	if err != nil {
-		return fmt.Errorf("failed to send metric %s: %v", metric["name"], err)
+		return fmt.Errorf("failed to send metric %s: %v", req.Name, err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("error response from server for metric %s: %s", metric["name"], resp.String())
+		return fmt.Errorf("error response from server for metric %s: %s", req.Name, resp.String())
 	}
 	return nil
 }

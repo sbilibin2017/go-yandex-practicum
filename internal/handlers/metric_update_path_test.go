@@ -26,7 +26,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 	}{
 		{
 			name:           "Missing metric value (empty string)",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "metric1",
 			valueParam:     "",
 			mockUpdateErr:  nil,
@@ -35,7 +35,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Valid counter metric update",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "metric1",
 			valueParam:     "10",
 			mockUpdateErr:  nil,
@@ -44,7 +44,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Valid gauge metric update",
-			mtype:          types.GaugeMetricType,
+			mtype:          string(types.GaugeMetricType),
 			nameParam:      "metric2",
 			valueParam:     "3.14",
 			mockUpdateErr:  nil,
@@ -62,7 +62,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Missing metric name",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "",
 			valueParam:     "10",
 			mockUpdateErr:  nil,
@@ -71,7 +71,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Missing metric value",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "metric1",
 			valueParam:     "",
 			mockUpdateErr:  nil,
@@ -80,7 +80,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Invalid value for counter metric",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "metric1",
 			valueParam:     "invalid",
 			mockUpdateErr:  nil,
@@ -89,7 +89,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Invalid value for gauge metric",
-			mtype:          types.GaugeMetricType,
+			mtype:          string(types.GaugeMetricType),
 			nameParam:      "metric2",
 			valueParam:     "invalid",
 			mockUpdateErr:  nil,
@@ -98,7 +98,7 @@ func TestMetricUpdatePathHandler_WithRouter(t *testing.T) {
 		},
 		{
 			name:           "Update service error",
-			mtype:          types.CounterMetricType,
+			mtype:          string(types.CounterMetricType),
 			nameParam:      "metric3",
 			valueParam:     "42",
 			mockUpdateErr:  errors.New("update failed"),

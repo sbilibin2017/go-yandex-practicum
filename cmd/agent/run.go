@@ -9,6 +9,7 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 )
 
@@ -27,7 +28,7 @@ func run() error {
 	client := resty.New()
 	metricFacade := facades.NewMetricFacade(*client, flagServerURL)
 
-	metricCh := make(chan map[string]any, 1000)
+	metricCh := make(chan types.MetricUpdatePathRequest, 1000)
 	defer close(metricCh)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

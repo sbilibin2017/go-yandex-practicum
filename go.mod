@@ -3,7 +3,6 @@ module github.com/sbilibin2017/go-yandex-practicum
 go 1.24.3
 
 require (
-	github.com/fatih/structs v1.1.0
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/golang/mock v1.6.0
