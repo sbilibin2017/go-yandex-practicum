@@ -4,4 +4,4 @@ mockgen:
 		-package=$(shell basename $(dir $(file)))
 
 test:
-	go test ./... -cover
+	go test ./internal/... -cover

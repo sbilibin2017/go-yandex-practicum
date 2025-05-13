@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/apps"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
+	"go.uber.org/zap"
 )
 
 func run() error {
@@ -19,28 +20,44 @@ func run() error {
 		return err
 	}
 
+	metricsCh := make(chan types.Metrics, 1000)
+	defer close(metricsCh)
+
 	pollTicker := time.NewTicker(time.Duration(flagPollInterval) * time.Second)
 	defer pollTicker.Stop()
 
 	reportTicker := time.NewTicker(time.Duration(flagReportInterval) * time.Second)
 	defer reportTicker.Stop()
 
-	metricsCh := make(chan types.Metrics, 1000)
-	defer close(metricsCh)
-
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	client := resty.New()
 
-	metricAgent := apps.ConfigureAgentApp(
-		client,
-		flagServerAddress,
-		"/update/",
-		metricsCh,
-		pollTicker,
-		reportTicker,
-	)
+	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagServerUpdateEndpoint)
 
-	return runners.RunWorker(ctx, metricAgent)
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- workers.StartMetricAgentWorker(
+			ctx,
+			metricFacade,
+			metricsCh,
+			pollTicker,
+			reportTicker,
+		)
+	}()
+
+	select {
+	case <-ctx.Done():
+		logger.Log.Info("Shutting down Metric Agent...")
+		return nil
+	case err := <-errCh:
+		if err != nil {
+			logger.Log.Error("Worker exited with error: ", zap.Error(err))
+			return err
+		}
+		logger.Log.Info("Worker exited cleanly")
+		return nil
+	}
 }

@@ -15,40 +15,25 @@ type MetricFacade interface {
 	Update(ctx context.Context, metric types.Metrics) error
 }
 
-type MetricAgent struct {
-	metricFacade MetricFacade
-	metricCh     chan types.Metrics
-	pollTicker   *time.Ticker
-	reportTicker *time.Ticker
-}
-
-func NewMetricAgent(
+func StartMetricAgentWorker(
+	ctx context.Context,
 	metricFacade MetricFacade,
 	metricCh chan types.Metrics,
 	pollTicker *time.Ticker,
 	reportTicker *time.Ticker,
-) *MetricAgent {
-	return &MetricAgent{
-		metricFacade: metricFacade,
-		metricCh:     metricCh,
-		pollTicker:   pollTicker,
-		reportTicker: reportTicker,
-	}
-}
-
-func (ma *MetricAgent) Start(ctx context.Context) error {
+) error {
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Log.Info("Context done, stopping metric agent.")
 			return nil
-		case <-ma.pollTicker.C:
+		case <-pollTicker.C:
 			logger.Log.Info("Polling metrics...")
-			produceGaugeMetrics(ma.metricCh)
-			produceCounterMetrics(ma.metricCh)
-		case <-ma.reportTicker.C:
+			produceGaugeMetrics(metricCh)
+			produceCounterMetrics(metricCh)
+		case <-reportTicker.C:
 			logger.Log.Info("Reporting metrics...")
-			consumeMetrics(ctx, ma.metricFacade, ma.metricCh)
+			consumeMetrics(ctx, metricFacade, metricCh)
 		}
 	}
 }
