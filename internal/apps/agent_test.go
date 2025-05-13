@@ -20,7 +20,7 @@ func TestConfigureAgentApp(t *testing.T) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	agent := ConfigureAgentApp(client, flagServerAddress, metricCh, pollTicker, reportTicker)
+	agent := ConfigureAgentApp(client, flagServerAddress, "/update/", metricCh, pollTicker, reportTicker)
 
 	assert.NotNil(t, agent)
 

@@ -15,19 +15,21 @@ func TestNewMetricFacade_AddsHTTPPrefix(t *testing.T) {
 	t.Run("adds http:// when no scheme is present", func(t *testing.T) {
 		rawAddress := "example.com"
 		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress)
+		facade := NewMetricFacade(client, rawAddress, "/update/")
 		assert.Equal(t, "http://example.com", facade.client.BaseURL)
 	})
+
 	t.Run("preserves http:// prefix", func(t *testing.T) {
 		rawAddress := "http://example.com"
 		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress)
+		facade := NewMetricFacade(client, rawAddress, "/update/")
 		assert.Equal(t, "http://example.com", facade.client.BaseURL)
 	})
+
 	t.Run("preserves https:// prefix", func(t *testing.T) {
 		rawAddress := "https://example.com"
 		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress)
+		facade := NewMetricFacade(client, rawAddress, "/update/")
 		assert.Equal(t, "https://example.com", facade.client.BaseURL)
 	})
 }
@@ -103,6 +105,7 @@ func TestMetricFacade_Update(t *testing.T) {
 			expectedErrPart: "failed to send metric",
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			serverURL := tt.serverURL
@@ -113,7 +116,7 @@ func TestMetricFacade_Update(t *testing.T) {
 				serverURL = server.URL
 			}
 			client := resty.New()
-			facade := NewMetricFacade(client, serverURL)
+			facade := NewMetricFacade(client, serverURL, "/update/")
 			err := facade.Update(context.Background(), tt.request)
 			if tt.expectError {
 				assert.Error(t, err)

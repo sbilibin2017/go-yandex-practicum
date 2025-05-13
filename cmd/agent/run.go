@@ -36,6 +36,7 @@ func run() error {
 	metricAgent := apps.ConfigureAgentApp(
 		client,
 		flagServerAddress,
+		"/update/",
 		metricsCh,
 		pollTicker,
 		reportTicker,

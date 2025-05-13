@@ -7,14 +7,16 @@ import (
 )
 
 var (
-	flagServerAddress  string
-	flagPollInterval   int
-	flagReportInterval int
-	flagLogLevel       string
+	flagServerAddress        string
+	flagServerUpdateEndpoint string
+	flagPollInterval         int
+	flagReportInterval       int
+	flagLogLevel             string
 )
 
 func parseFlags() {
 	flag.StringVar(&flagServerAddress, "a", "http://localhost:8080", "Metrics server address")
+	flag.StringVar(&flagServerUpdateEndpoint, "u", "/update/", "Metrics server update endpoint")
 	flag.IntVar(&flagPollInterval, "p", 2, "Poll interval in seconds")
 	flag.IntVar(&flagReportInterval, "r", 10, "Report interval in seconds")
 	flag.StringVar(&flagLogLevel, "l", "info", "Log level (e.g., debug, info, warn, error)")
@@ -23,6 +25,9 @@ func parseFlags() {
 
 	if envServerAddress := os.Getenv("ADDRESS"); envServerAddress != "" {
 		flagServerAddress = envServerAddress
+	}
+	if envUpdateEndpoint := os.Getenv("UPDATE_ENDPOINT"); envUpdateEndpoint != "" {
+		flagServerUpdateEndpoint = envUpdateEndpoint
 	}
 	if envPoll := os.Getenv("POLL_INTERVAL"); envPoll != "" {
 		if val, err := strconv.Atoi(envPoll); err == nil {
