@@ -13,11 +13,13 @@ func NewMetricRouter(
 	metricGetBodyHandler http.HandlerFunc,
 	metricListAllHandler http.HandlerFunc,
 	loggingMiddleware func(next http.Handler) http.Handler,
+	gzipMiddleware func(next http.Handler) http.Handler,
 ) *chi.Mux {
 	router := chi.NewRouter()
 
 	router.Use(
 		loggingMiddleware,
+		gzipMiddleware,
 	)
 
 	router.Post("/update/{type}/{name}/{value}", metricUpdatePathHandler)

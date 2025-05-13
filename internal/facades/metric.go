@@ -10,27 +10,30 @@ import (
 )
 
 type MetricFacade struct {
-	client *resty.Client
+	client   *resty.Client
+	endpoint string
 }
 
-func NewMetricFacade(client *resty.Client, flagServerAddress string) *MetricFacade {
+func NewMetricFacade(client *resty.Client, flagServerAddress string, endpoint string) *MetricFacade {
 	if !strings.HasPrefix(flagServerAddress, "http://") && !strings.HasPrefix(flagServerAddress, "https://") {
 		flagServerAddress = "http://" + flagServerAddress
 	}
 	client.SetBaseURL(flagServerAddress)
-	return &MetricFacade{client: client}
+	return &MetricFacade{client: client, endpoint: endpoint}
 }
 
-func (mf *MetricFacade) Update(ctx context.Context, req types.Metrics) error {
+func (mf *MetricFacade) Update(ctx context.Context, metrics types.Metrics) error {
 	resp, err := mf.client.R().
 		SetHeader("Content-Type", "application/json").
-		SetBody(req).
-		Post("/update/")
+		SetHeader("Accept-Encoding", "gzip").
+		SetBody(metrics).
+		Post(mf.endpoint)
+
 	if err != nil {
-		return fmt.Errorf("failed to send metric %s: %v", req.ID, err)
+		return fmt.Errorf("failed to send metric %s: %v", metrics.ID, err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("error response from server for metric %s: %s", req.ID, resp.String())
+		return fmt.Errorf("error response from server for metric %s: %s", metrics.ID, resp.String())
 	}
 	return nil
 }

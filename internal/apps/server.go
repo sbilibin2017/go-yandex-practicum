@@ -47,6 +47,7 @@ func ConfigureServerApp(
 		metricGetBodyHandler,
 		metricListAllHandler,
 		middlewares.LoggingMiddleware,
+		middlewares.GzipMiddleware,
 	)
 
 	router.Mount("/", metricRouter)

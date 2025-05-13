@@ -16,12 +16,19 @@ func TestMetricRouter(t *testing.T) {
 		getPath    bool
 		getBody    bool
 		list       bool
-		middleware bool
+		middleware int
 	}{}
 
 	loggingMiddleware := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called.middleware = true
+			called.middleware++
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	gzipMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called.middleware++
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -54,65 +61,76 @@ func TestMetricRouter(t *testing.T) {
 		getBodyHandler,
 		listHandler,
 		loggingMiddleware,
+		gzipMiddleware,
 	)
 
-	t.Run("POST /update/{type}/{name}/{value}", func(t *testing.T) {
-		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
-		req := httptest.NewRequest(http.MethodPost, "/update/counter/myCounter/42", nil)
-		rec := httptest.NewRecorder()
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		expectFunc func()
+	}{
+		{
+			name:   "POST /update/{type}/{name}/{value}",
+			method: http.MethodPost,
+			path:   "/update/counter/myCounter/42",
+			expectFunc: func() {
+				assert.True(t, called.updatePath)
+			},
+		},
+		{
+			name:   "POST /update/",
+			method: http.MethodPost,
+			path:   "/update/",
+			expectFunc: func() {
+				assert.True(t, called.updateBody)
+			},
+		},
+		{
+			name:   "GET /value/{type}/{name}",
+			method: http.MethodGet,
+			path:   "/value/gauge/myGauge",
+			expectFunc: func() {
+				assert.True(t, called.getPath)
+			},
+		},
+		{
+			name:   "POST /value/",
+			method: http.MethodPost,
+			path:   "/value/",
+			expectFunc: func() {
+				assert.True(t, called.getBody)
+			},
+		},
+		{
+			name:   "GET /",
+			method: http.MethodGet,
+			path:   "/",
+			expectFunc: func() {
+				assert.True(t, called.list)
+			},
+		},
+	}
 
-		router.ServeHTTP(rec, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called = struct {
+				updatePath bool
+				updateBody bool
+				getPath    bool
+				getBody    bool
+				list       bool
+				middleware int
+			}{}
 
-		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.updatePath)
-		assert.True(t, called.middleware)
-	})
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rec := httptest.NewRecorder()
 
-	t.Run("POST /update/", func(t *testing.T) {
-		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
-		req := httptest.NewRequest(http.MethodPost, "/update/", nil)
-		rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
 
-		router.ServeHTTP(rec, req)
-
-		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.updateBody)
-		assert.True(t, called.middleware)
-	})
-
-	t.Run("GET /value/{type}/{name}", func(t *testing.T) {
-		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
-		req := httptest.NewRequest(http.MethodGet, "/value/gauge/myGauge", nil)
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.getPath)
-		assert.True(t, called.middleware)
-	})
-
-	t.Run("POST /value/", func(t *testing.T) {
-		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
-		req := httptest.NewRequest(http.MethodPost, "/value/", nil)
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.getBody)
-		assert.True(t, called.middleware)
-	})
-
-	t.Run("GET /", func(t *testing.T) {
-		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-
-		router.ServeHTTP(rec, req)
-
-		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.list)
-		assert.True(t, called.middleware)
-	})
+			require.Equal(t, http.StatusOK, rec.Code)
+			tt.expectFunc()
+			assert.Equal(t, 2, called.middleware)
+		})
+	}
 }

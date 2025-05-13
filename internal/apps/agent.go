@@ -12,11 +12,12 @@ import (
 func ConfigureAgentApp(
 	client *resty.Client,
 	flagServerAddress string,
+	updateEndpoint string,
 	metricCh chan types.Metrics,
 	pollTicker *time.Ticker,
 	reportTicker *time.Ticker,
 ) *workers.MetricAgent {
-	metricFacade := facades.NewMetricFacade(client, flagServerAddress)
+	metricFacade := facades.NewMetricFacade(client, flagServerAddress, updateEndpoint)
 
 	metricAgent := workers.NewMetricAgent(
 		metricFacade,
