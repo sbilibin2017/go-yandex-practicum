@@ -34,13 +34,17 @@ func ConfigureServerApp(
 		metricMemoryListAllRepository,
 	)
 
-	metricUpdateHandler := handlers.NewMetricUpdatePathHandler(metricUpdateService)
-	metricGetHandler := handlers.NewMetricGetPathHandler(metricGetService)
+	metricUpdatePathHandler := handlers.NewMetricUpdatePathHandler(metricUpdateService)
+	metricUpdateBodyHandler := handlers.NewMetricUpdateBodyHandler(metricUpdateService)
+	metricGetPathHandler := handlers.NewMetricGetPathHandler(metricGetService)
+	metricGetBodyHandler := handlers.NewMetricGetBodyHandler(metricGetService)
 	metricListAllHandler := handlers.NewMetricListAllHTMLHandler(metricListAllService)
 
 	metricRouter := routers.NewMetricRouter(
-		metricUpdateHandler,
-		metricGetHandler,
+		metricUpdatePathHandler,
+		metricUpdateBodyHandler,
+		metricGetPathHandler,
+		metricGetBodyHandler,
 		metricListAllHandler,
 		middlewares.LoggingMiddleware,
 	)

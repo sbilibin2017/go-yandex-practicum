@@ -25,7 +25,7 @@ func run() error {
 	reportTicker := time.NewTicker(time.Duration(flagReportInterval) * time.Second)
 	defer reportTicker.Stop()
 
-	metricsCh := make(chan types.MetricUpdatePathRequest, 1000)
+	metricsCh := make(chan types.Metrics, 1000)
 	defer close(metricsCh)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -34,7 +34,7 @@ func run() error {
 	client := resty.New()
 
 	metricAgent := apps.ConfigureAgentApp(
-		*client,
+		client,
 		flagServerAddress,
 		metricsCh,
 		pollTicker,

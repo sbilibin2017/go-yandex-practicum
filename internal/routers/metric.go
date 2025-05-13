@@ -7,8 +7,10 @@ import (
 )
 
 func NewMetricRouter(
-	metricUpdateHandler http.HandlerFunc,
-	metricGetHandler http.HandlerFunc,
+	metricUpdatePathHandler http.HandlerFunc,
+	metricUpdateBodyHandler http.HandlerFunc,
+	metricGetPathHandler http.HandlerFunc,
+	metricGetBodyHandler http.HandlerFunc,
 	metricListAllHandler http.HandlerFunc,
 	loggingMiddleware func(next http.Handler) http.Handler,
 ) *chi.Mux {
@@ -18,8 +20,10 @@ func NewMetricRouter(
 		loggingMiddleware,
 	)
 
-	router.Post("/update/{type}/{name}/{value}", metricUpdateHandler)
-	router.Get("/value/{type}/{name}", metricGetHandler)
+	router.Post("/update/{type}/{name}/{value}", metricUpdatePathHandler)
+	router.Post("/update/", metricUpdateBodyHandler)
+	router.Get("/value/{type}/{name}", metricGetPathHandler)
+	router.Post("/value/", metricGetBodyHandler)
 	router.Get("/", metricListAllHandler)
 
 	return router

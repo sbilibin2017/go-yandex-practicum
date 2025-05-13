@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/rand"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
@@ -13,19 +12,19 @@ import (
 )
 
 type MetricFacade interface {
-	Update(ctx context.Context, metric types.MetricUpdatePathRequest) error
+	Update(ctx context.Context, metric types.Metrics) error
 }
 
 type MetricAgent struct {
 	metricFacade MetricFacade
-	metricCh     chan types.MetricUpdatePathRequest
+	metricCh     chan types.Metrics
 	pollTicker   *time.Ticker
 	reportTicker *time.Ticker
 }
 
 func NewMetricAgent(
 	metricFacade MetricFacade,
-	metricCh chan types.MetricUpdatePathRequest,
+	metricCh chan types.Metrics,
 	pollTicker *time.Ticker,
 	reportTicker *time.Ticker,
 ) *MetricAgent {
@@ -57,17 +56,16 @@ func (ma *MetricAgent) Start(ctx context.Context) error {
 func consumeMetrics(
 	ctx context.Context,
 	handler MetricFacade,
-	ch chan types.MetricUpdatePathRequest,
+	ch chan types.Metrics,
 ) {
 	for {
 		select {
 		case m := <-ch:
-			logger.Log.Info("Consuming metric", zap.String("name", m.Name), zap.String("type", m.Type), zap.String("value", m.Value))
 			err := handler.Update(ctx, m)
 			if err != nil {
-				logger.Log.Error("Error updating metric", zap.String("name", m.Name), zap.Error(err))
+				logger.Log.Error("Error updating metric", zap.String("id", m.ID), zap.Error(err))
 			} else {
-				logger.Log.Info("Successfully updated metric", zap.String("name", m.Name))
+				logger.Log.Info("Successfully updated metric", zap.String("id", m.ID))
 			}
 		default:
 			logger.Log.Debug("No metrics to consume.")
@@ -76,43 +74,72 @@ func consumeMetrics(
 	}
 }
 
-func produceGaugeMetrics(ch chan types.MetricUpdatePathRequest) {
+func produceGaugeMetrics(ch chan types.Metrics) {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	logger.Log.Info("Producing gauge metrics...")
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Alloc", Value: strconv.FormatFloat(float64(memStats.Alloc), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "BuckHashSys", Value: strconv.FormatFloat(float64(memStats.BuckHashSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Frees", Value: strconv.FormatFloat(float64(memStats.Frees), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "GCCPUFraction", Value: strconv.FormatFloat(memStats.GCCPUFraction, 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "GCSys", Value: strconv.FormatFloat(float64(memStats.GCSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapAlloc", Value: strconv.FormatFloat(float64(memStats.HeapAlloc), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapIdle", Value: strconv.FormatFloat(float64(memStats.HeapIdle), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapInuse", Value: strconv.FormatFloat(float64(memStats.HeapInuse), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapObjects", Value: strconv.FormatFloat(float64(memStats.HeapObjects), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapReleased", Value: strconv.FormatFloat(float64(memStats.HeapReleased), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "HeapSys", Value: strconv.FormatFloat(float64(memStats.HeapSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "LastGC", Value: strconv.FormatFloat(float64(memStats.LastGC), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Lookups", Value: strconv.FormatFloat(float64(memStats.Lookups), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MCacheInuse", Value: strconv.FormatFloat(float64(memStats.MCacheInuse), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MCacheSys", Value: strconv.FormatFloat(float64(memStats.MCacheSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MSpanInuse", Value: strconv.FormatFloat(float64(memStats.MSpanInuse), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "MSpanSys", Value: strconv.FormatFloat(float64(memStats.MSpanSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Mallocs", Value: strconv.FormatFloat(float64(memStats.Mallocs), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NextGC", Value: strconv.FormatFloat(float64(memStats.NextGC), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NumForcedGC", Value: strconv.FormatFloat(float64(memStats.NumForcedGC), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "NumGC", Value: strconv.FormatFloat(float64(memStats.NumGC), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "OtherSys", Value: strconv.FormatFloat(float64(memStats.OtherSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "PauseTotalNs", Value: strconv.FormatFloat(float64(memStats.PauseTotalNs), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "StackInuse", Value: strconv.FormatFloat(float64(memStats.StackInuse), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "StackSys", Value: strconv.FormatFloat(float64(memStats.StackSys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "Sys", Value: strconv.FormatFloat(float64(memStats.Sys), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "TotalAlloc", Value: strconv.FormatFloat(float64(memStats.TotalAlloc), 'f', -1, 64)}
-	ch <- types.MetricUpdatePathRequest{Type: string(types.GaugeMetricType), Name: "RandomValue", Value: strconv.FormatFloat(rand.Float64(), 'f', -1, 64)}
+
+	metrics := map[string]float64{
+		"Alloc":         float64(memStats.Alloc),
+		"BuckHashSys":   float64(memStats.BuckHashSys),
+		"Frees":         float64(memStats.Frees),
+		"GCCPUFraction": memStats.GCCPUFraction,
+		"GCSys":         float64(memStats.GCSys),
+		"HeapAlloc":     float64(memStats.HeapAlloc),
+		"HeapIdle":      float64(memStats.HeapIdle),
+		"HeapInuse":     float64(memStats.HeapInuse),
+		"HeapObjects":   float64(memStats.HeapObjects),
+		"HeapReleased":  float64(memStats.HeapReleased),
+		"HeapSys":       float64(memStats.HeapSys),
+		"LastGC":        float64(memStats.LastGC),
+		"Lookups":       float64(memStats.Lookups),
+		"MCacheInuse":   float64(memStats.MCacheInuse),
+		"MCacheSys":     float64(memStats.MCacheSys),
+		"MSpanInuse":    float64(memStats.MSpanInuse),
+		"MSpanSys":      float64(memStats.MSpanSys),
+		"Mallocs":       float64(memStats.Mallocs),
+		"NextGC":        float64(memStats.NextGC),
+		"NumForcedGC":   float64(memStats.NumForcedGC),
+		"NumGC":         float64(memStats.NumGC),
+		"OtherSys":      float64(memStats.OtherSys),
+		"PauseTotalNs":  float64(memStats.PauseTotalNs),
+		"StackInuse":    float64(memStats.StackInuse),
+		"StackSys":      float64(memStats.StackSys),
+		"Sys":           float64(memStats.Sys),
+		"TotalAlloc":    float64(memStats.TotalAlloc),
+		"RandomValue":   rand.Float64(),
+	}
+
+	for name, val := range metrics {
+		metric := types.Metrics{
+			MetricID: types.MetricID{
+				ID:   name,
+				Type: types.GaugeMetricType,
+			},
+			Delta: nil,
+			Value: &val,
+		}
+		ch <- metric
+	}
+
 	logger.Log.Info("Gauge metrics produced.")
 }
 
-func produceCounterMetrics(ch chan types.MetricUpdatePathRequest) {
-	logger.Log.Info("Producing counter metrics...")
-	ch <- types.MetricUpdatePathRequest{Type: string(types.CounterMetricType), Name: "PollCount", Value: "1"}
+func produceCounterMetrics(ch chan types.Metrics) {
+	counterData := map[string]int64{
+		"PollCount": 1,
+	}
+
+	for name, delta := range counterData {
+		metric := types.Metrics{
+			MetricID: types.MetricID{
+				ID:   name,
+				Type: types.CounterMetricType,
+			},
+			Delta: &delta,
+			Value: nil,
+		}
+		ch <- metric
+	}
+
 	logger.Log.Info("Counter metrics produced.")
 }

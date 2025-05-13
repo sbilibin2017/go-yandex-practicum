@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
@@ -20,25 +19,10 @@ func NewMetricListAllHTMLHandler(svc MetricListAllHTMLService) http.HandlerFunc 
 			return
 		}
 
+		metricsHTML := types.NewMetricsHTML(metrics)
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		renderMetricsHTML(w, metrics)
+		w.Write([]byte(metricsHTML))
 	}
-}
-
-func renderMetricsHTML(w http.ResponseWriter, metrics []types.Metrics) {
-	fmt.Fprintln(w, "<!DOCTYPE html><html><head><title>Metrics</title></head><body><ul>")
-	for _, m := range metrics {
-		switch m.Type {
-		case types.GaugeMetricType:
-			if m.Value != nil {
-				fmt.Fprintf(w, "<li>%s: %v</li>\n", m.ID, *m.Value)
-			}
-		case types.CounterMetricType:
-			if m.Delta != nil {
-				fmt.Fprintf(w, "<li>%s: %d</li>\n", m.ID, *m.Delta)
-			}
-		}
-	}
-	fmt.Fprintln(w, "</ul></body></html>")
 }

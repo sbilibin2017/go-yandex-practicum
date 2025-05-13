@@ -10,9 +10,9 @@ import (
 )
 
 func ConfigureAgentApp(
-	client resty.Client,
+	client *resty.Client,
 	flagServerAddress string,
-	metricCh chan types.MetricUpdatePathRequest,
+	metricCh chan types.Metrics,
 	pollTicker *time.Ticker,
 	reportTicker *time.Ticker,
 ) *workers.MetricAgent {

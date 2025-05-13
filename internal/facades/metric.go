@@ -10,13 +10,10 @@ import (
 )
 
 type MetricFacade struct {
-	client resty.Client
+	client *resty.Client
 }
 
-func NewMetricFacade(
-	client resty.Client,
-	flagServerAddress string,
-) *MetricFacade {
+func NewMetricFacade(client *resty.Client, flagServerAddress string) *MetricFacade {
 	if !strings.HasPrefix(flagServerAddress, "http://") && !strings.HasPrefix(flagServerAddress, "https://") {
 		flagServerAddress = "http://" + flagServerAddress
 	}
@@ -24,18 +21,16 @@ func NewMetricFacade(
 	return &MetricFacade{client: client}
 }
 
-func (mf *MetricFacade) Update(
-	ctx context.Context, req types.MetricUpdatePathRequest,
-) error {
-	url := fmt.Sprintf("/update/%s/%s/%s", req.Type, req.Name, req.Value)
+func (mf *MetricFacade) Update(ctx context.Context, req types.Metrics) error {
 	resp, err := mf.client.R().
-		SetHeader("Content-Type", "text/plain").
-		Post(url)
+		SetHeader("Content-Type", "application/json").
+		SetBody(req).
+		Post("/update/")
 	if err != nil {
-		return fmt.Errorf("failed to send metric %s: %v", req.Name, err)
+		return fmt.Errorf("failed to send metric %s: %v", req.ID, err)
 	}
 	if resp.IsError() {
-		return fmt.Errorf("error response from server for metric %s: %s", req.Name, resp.String())
+		return fmt.Errorf("error response from server for metric %s: %s", req.ID, resp.String())
 	}
 	return nil
 }

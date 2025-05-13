@@ -11,27 +11,35 @@ import (
 
 func TestMetricRouter(t *testing.T) {
 	called := struct {
-		update bool
-		get    bool
-		list   bool
-		mw     bool
+		updatePath bool
+		updateBody bool
+		getPath    bool
+		getBody    bool
+		list       bool
+		middleware bool
 	}{}
 
-	// mock middleware: просто отмечает, что был вызван
 	loggingMiddleware := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called.mw = true
+			called.middleware = true
 			next.ServeHTTP(w, r)
 		})
 	}
 
-	// mock handlers
-	updateHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called.update = true
+	updatePathHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.updatePath = true
 		w.WriteHeader(http.StatusOK)
 	})
-	getHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called.get = true
+	updateBodyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.updateBody = true
+		w.WriteHeader(http.StatusOK)
+	})
+	getPathHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.getPath = true
+		w.WriteHeader(http.StatusOK)
+	})
+	getBodyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called.getBody = true
 		w.WriteHeader(http.StatusOK)
 	})
 	listHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,34 +47,65 @@ func TestMetricRouter(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	router := NewMetricRouter(updateHandler, getHandler, listHandler, loggingMiddleware)
+	router := NewMetricRouter(
+		updatePathHandler,
+		updateBodyHandler,
+		getPathHandler,
+		getBodyHandler,
+		listHandler,
+		loggingMiddleware,
+	)
 
 	t.Run("POST /update/{type}/{name}/{value}", func(t *testing.T) {
-		called = struct{ update, get, list, mw bool }{}
-		req := httptest.NewRequest(http.MethodPost, "/update/gauge/testmetric/123.4", nil)
+		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
+		req := httptest.NewRequest(http.MethodPost, "/update/counter/myCounter/42", nil)
 		rec := httptest.NewRecorder()
 
 		router.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.update)
-		assert.True(t, called.mw)
+		assert.True(t, called.updatePath)
+		assert.True(t, called.middleware)
+	})
+
+	t.Run("POST /update/", func(t *testing.T) {
+		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
+		req := httptest.NewRequest(http.MethodPost, "/update/", nil)
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.True(t, called.updateBody)
+		assert.True(t, called.middleware)
 	})
 
 	t.Run("GET /value/{type}/{name}", func(t *testing.T) {
-		called = struct{ update, get, list, mw bool }{}
-		req := httptest.NewRequest(http.MethodGet, "/value/counter/testmetric", nil)
+		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
+		req := httptest.NewRequest(http.MethodGet, "/value/gauge/myGauge", nil)
 		rec := httptest.NewRecorder()
 
 		router.ServeHTTP(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code)
-		assert.True(t, called.get)
-		assert.True(t, called.mw)
+		assert.True(t, called.getPath)
+		assert.True(t, called.middleware)
+	})
+
+	t.Run("POST /value/", func(t *testing.T) {
+		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
+		req := httptest.NewRequest(http.MethodPost, "/value/", nil)
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.True(t, called.getBody)
+		assert.True(t, called.middleware)
 	})
 
 	t.Run("GET /", func(t *testing.T) {
-		called = struct{ update, get, list, mw bool }{}
+		called = struct{ updatePath, updateBody, getPath, getBody, list, middleware bool }{}
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
 
@@ -74,6 +113,6 @@ func TestMetricRouter(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		assert.True(t, called.list)
-		assert.True(t, called.mw)
+		assert.True(t, called.middleware)
 	})
 }

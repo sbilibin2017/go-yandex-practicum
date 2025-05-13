@@ -18,7 +18,6 @@ func RunServer(ctx context.Context, server Server) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		logger.Log.Info("Starting server...")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 			return
@@ -32,19 +31,13 @@ func RunServer(ctx context.Context, server Server) error {
 		defer cancel()
 
 		logger.Log.Info("Shutting down server gracefully...")
-		if err := server.Shutdown(ctxShutdown); err != nil {
-			logger.Log.Error("Server shutdown failed", zap.Error(err))
-			return err
-		}
-		logger.Log.Info("Server stopped gracefully")
+		server.Shutdown(ctxShutdown)
 		return nil
 
 	case err := <-errCh:
 		if err != nil {
 			logger.Log.Error("Server failed to start", zap.Error(err))
-			return err
 		}
-		logger.Log.Info("Server exited cleanly")
-		return nil
+		return err
 	}
 }

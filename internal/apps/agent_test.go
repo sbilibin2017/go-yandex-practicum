@@ -11,9 +11,9 @@ import (
 )
 
 func TestConfigureAgentApp(t *testing.T) {
-	client := *resty.New()
+	client := resty.New()
 	flagServerAddress := "localhost:8080"
-	metricCh := make(chan types.MetricUpdatePathRequest, 1)
+	metricCh := make(chan types.Metrics, 1)
 	pollTicker := time.NewTicker(time.Second)
 	reportTicker := time.NewTicker(2 * time.Second)
 
