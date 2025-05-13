@@ -11,16 +11,11 @@ type Worker interface {
 	Start(ctx context.Context) error
 }
 
-func RunWorker(
-	ctx context.Context,
-	worker Worker,
-) error {
+func RunWorker(ctx context.Context, worker Worker) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		logger.Log.Info("Starting Metric Agent...")
-		err := worker.Start(ctx)
-		errCh <- err
+		errCh <- worker.Start(ctx)
 	}()
 
 	select {

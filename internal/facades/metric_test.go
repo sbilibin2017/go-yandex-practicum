@@ -1,4 +1,4 @@
-package facades_test
+package facades
 
 import (
 	"context"
@@ -7,73 +7,114 @@ import (
 	"testing"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestNewMetricFacade_AddsHTTPPrefix(t *testing.T) {
+	t.Run("adds http:// when no scheme is present", func(t *testing.T) {
+		rawAddress := "example.com"
+		client := resty.New()
+		facade := NewMetricFacade(client, rawAddress)
+		assert.Equal(t, "http://example.com", facade.client.BaseURL)
+	})
+	t.Run("preserves http:// prefix", func(t *testing.T) {
+		rawAddress := "http://example.com"
+		client := resty.New()
+		facade := NewMetricFacade(client, rawAddress)
+		assert.Equal(t, "http://example.com", facade.client.BaseURL)
+	})
+	t.Run("preserves https:// prefix", func(t *testing.T) {
+		rawAddress := "https://example.com"
+		client := resty.New()
+		facade := NewMetricFacade(client, rawAddress)
+		assert.Equal(t, "https://example.com", facade.client.BaseURL)
+	})
+}
 
 func TestMetricFacade_Update(t *testing.T) {
 	tests := []struct {
 		name            string
 		serverHandler   http.HandlerFunc
-		request         types.MetricUpdatePathRequest
+		request         types.Metrics
 		serverURL       string
 		expectError     bool
 		expectedErrPart string
 	}{
 		{
-			name: "Success response",
+			name: "Success gauge metric",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/update/gauge/CPU/99.5", r.URL.Path)
-				assert.Equal(t, "text/plain", r.Header.Get("Content-Type"))
+				assert.Equal(t, "/update/", r.URL.Path)
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 				w.WriteHeader(http.StatusOK)
 			},
-			request: types.MetricUpdatePathRequest{
-				Type:  "gauge",
-				Name:  "CPU",
-				Value: "99.5",
+			request: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "CPU",
+					Type: types.GaugeMetricType,
+				},
+				Value: float64Ptr(99.5),
 			},
 			expectError: false,
 		},
 		{
-			name: "Server returns error response",
+			name: "Success counter metric",
+			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/update/", r.URL.Path)
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				w.WriteHeader(http.StatusOK)
+			},
+			request: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "Requests",
+					Type: types.CounterMetricType,
+				},
+				Delta: int64Ptr(42),
+			},
+			expectError: false,
+		},
+		{
+			name: "Server returns error",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "bad request", http.StatusBadRequest)
 			},
-			request: types.MetricUpdatePathRequest{
-				Type:  "counter",
-				Name:  "Requests",
-				Value: "10",
+			request: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "Errors",
+					Type: types.CounterMetricType,
+				},
+				Delta: int64Ptr(5),
 			},
 			expectError:     true,
 			expectedErrPart: "error response from server",
 		},
 		{
-			name:            "Request error due to bad URL",
-			serverHandler:   nil,
-			request:         types.MetricUpdatePathRequest{Type: "counter", Name: "Errors", Value: "5"},
-			serverURL:       "http://invalid-host.local", // должен быть некорректен
+			name:          "Bad URL",
+			serverHandler: nil,
+			request: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "Timeouts",
+					Type: types.GaugeMetricType,
+				},
+				Value: float64Ptr(0.1),
+			},
+			serverURL:       "http://invalid-host.local",
 			expectError:     true,
 			expectedErrPart: "failed to send metric",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			serverURL := tt.serverURL
-
 			var server *httptest.Server
 			if tt.serverHandler != nil {
 				server = httptest.NewServer(tt.serverHandler)
 				defer server.Close()
 				serverURL = server.URL
 			}
-
-			client := *resty.New()
-			facade := facades.NewMetricFacade(client, serverURL)
-
+			client := resty.New()
+			facade := NewMetricFacade(client, serverURL)
 			err := facade.Update(context.Background(), tt.request)
-
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.expectedErrPart != "" {
@@ -84,4 +125,12 @@ func TestMetricFacade_Update(t *testing.T) {
 			}
 		})
 	}
+}
+
+func float64Ptr(f float64) *float64 {
+	return &f
+}
+
+func int64Ptr(i int64) *int64 {
+	return &i
 }

@@ -36,7 +36,7 @@ func (m *MockMetricFacade) EXPECT() *MockMetricFacadeMockRecorder {
 }
 
 // Update mocks base method.
-func (m *MockMetricFacade) Update(ctx context.Context, metric types.MetricUpdatePathRequest) error {
+func (m *MockMetricFacade) Update(ctx context.Context, metric types.Metrics) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Update", ctx, metric)
 	ret0, _ := ret[0].(error)

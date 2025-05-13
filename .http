@@ -1,8 +1,0 @@
-POST http://localhost:8080/update/gauge/Alloc/100 HTTP/1.1
-Content-Type: application/json
-
-{
-  "type": "counter",
-  "name": "Alloc",
-  "value": "100"
-}

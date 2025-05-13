@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -17,12 +16,16 @@ func TestParseURLParam_Success(t *testing.T) {
 	}
 	r := chi.NewRouter()
 	r.Get("/update/{name}/{type}/{value}", func(w http.ResponseWriter, r *http.Request) {
-		var request types.MetricUpdatePathRequest
-		parseURLParam(r, &request)
+		var req struct {
+			Name  string `urlparam:"name"`
+			Type  string `urlparam:"type"`
+			Value string `urlparam:"value"`
+		}
+		parseURLParam(r, &req)
 
-		assert.Equal(t, "John", request.Name)
-		assert.Equal(t, "type1", request.Type)
-		assert.Equal(t, "100", request.Value)
+		assert.Equal(t, "John", req.Name)
+		assert.Equal(t, "type1", req.Type)
+		assert.Equal(t, "100", req.Value)
 		w.Write([]byte("OK"))
 	})
 	rr := httptest.NewRecorder()
@@ -37,12 +40,16 @@ func TestParseURLParam_EmptyParam(t *testing.T) {
 	}
 	r := chi.NewRouter()
 	r.Get("/update/{name}/{type}/{value}", func(w http.ResponseWriter, r *http.Request) {
-		var request types.MetricUpdatePathRequest
-		parseURLParam(r, &request)
+		var req struct {
+			Name  string `urlparam:"name"`
+			Type  string `urlparam:"type"`
+			Value string `urlparam:"value"`
+		}
+		parseURLParam(r, &req)
 
-		assert.Empty(t, request.Name)
-		assert.Equal(t, "type1", request.Type)
-		assert.Equal(t, "100", request.Value)
+		assert.Empty(t, req.Name)
+		assert.Equal(t, "type1", req.Type)
+		assert.Equal(t, "100", req.Value)
 		w.Write([]byte("OK"))
 	})
 	rr := httptest.NewRecorder()
