@@ -12,31 +12,31 @@ import (
 	types "github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-// MockMetricMemoryListAllRepository is a mock of MetricMemoryListAllRepository interface.
-type MockMetricMemoryListAllRepository struct {
+// MockMetricListAllMemoryRepository is a mock of MetricListAllMemoryRepository interface.
+type MockMetricListAllMemoryRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricMemoryListAllRepositoryMockRecorder
+	recorder *MockMetricListAllMemoryRepositoryMockRecorder
 }
 
-// MockMetricMemoryListAllRepositoryMockRecorder is the mock recorder for MockMetricMemoryListAllRepository.
-type MockMetricMemoryListAllRepositoryMockRecorder struct {
-	mock *MockMetricMemoryListAllRepository
+// MockMetricListAllMemoryRepositoryMockRecorder is the mock recorder for MockMetricListAllMemoryRepository.
+type MockMetricListAllMemoryRepositoryMockRecorder struct {
+	mock *MockMetricListAllMemoryRepository
 }
 
-// NewMockMetricMemoryListAllRepository creates a new mock instance.
-func NewMockMetricMemoryListAllRepository(ctrl *gomock.Controller) *MockMetricMemoryListAllRepository {
-	mock := &MockMetricMemoryListAllRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricMemoryListAllRepositoryMockRecorder{mock}
+// NewMockMetricListAllMemoryRepository creates a new mock instance.
+func NewMockMetricListAllMemoryRepository(ctrl *gomock.Controller) *MockMetricListAllMemoryRepository {
+	mock := &MockMetricListAllMemoryRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricListAllMemoryRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricMemoryListAllRepository) EXPECT() *MockMetricMemoryListAllRepositoryMockRecorder {
+func (m *MockMetricListAllMemoryRepository) EXPECT() *MockMetricListAllMemoryRepositoryMockRecorder {
 	return m.recorder
 }
 
 // ListAll mocks base method.
-func (m *MockMetricMemoryListAllRepository) ListAll(ctx context.Context) ([]types.Metrics, error) {
+func (m *MockMetricListAllMemoryRepository) ListAll(ctx context.Context) ([]types.Metrics, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListAll", ctx)
 	ret0, _ := ret[0].([]types.Metrics)
@@ -45,36 +45,36 @@ func (m *MockMetricMemoryListAllRepository) ListAll(ctx context.Context) ([]type
 }
 
 // ListAll indicates an expected call of ListAll.
-func (mr *MockMetricMemoryListAllRepositoryMockRecorder) ListAll(ctx interface{}) *gomock.Call {
+func (mr *MockMetricListAllMemoryRepositoryMockRecorder) ListAll(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockMetricMemoryListAllRepository)(nil).ListAll), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockMetricListAllMemoryRepository)(nil).ListAll), ctx)
 }
 
-// MockMetricFileSaveRepository is a mock of MetricFileSaveRepository interface.
-type MockMetricFileSaveRepository struct {
+// MockMetricSaveFileRepository is a mock of MetricSaveFileRepository interface.
+type MockMetricSaveFileRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricFileSaveRepositoryMockRecorder
+	recorder *MockMetricSaveFileRepositoryMockRecorder
 }
 
-// MockMetricFileSaveRepositoryMockRecorder is the mock recorder for MockMetricFileSaveRepository.
-type MockMetricFileSaveRepositoryMockRecorder struct {
-	mock *MockMetricFileSaveRepository
+// MockMetricSaveFileRepositoryMockRecorder is the mock recorder for MockMetricSaveFileRepository.
+type MockMetricSaveFileRepositoryMockRecorder struct {
+	mock *MockMetricSaveFileRepository
 }
 
-// NewMockMetricFileSaveRepository creates a new mock instance.
-func NewMockMetricFileSaveRepository(ctrl *gomock.Controller) *MockMetricFileSaveRepository {
-	mock := &MockMetricFileSaveRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricFileSaveRepositoryMockRecorder{mock}
+// NewMockMetricSaveFileRepository creates a new mock instance.
+func NewMockMetricSaveFileRepository(ctrl *gomock.Controller) *MockMetricSaveFileRepository {
+	mock := &MockMetricSaveFileRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricSaveFileRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricFileSaveRepository) EXPECT() *MockMetricFileSaveRepositoryMockRecorder {
+func (m *MockMetricSaveFileRepository) EXPECT() *MockMetricSaveFileRepositoryMockRecorder {
 	return m.recorder
 }
 
 // Save mocks base method.
-func (m *MockMetricFileSaveRepository) Save(ctx context.Context, metric types.Metrics) error {
+func (m *MockMetricSaveFileRepository) Save(ctx context.Context, metric types.Metrics) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Save", ctx, metric)
 	ret0, _ := ret[0].(error)
@@ -82,36 +82,36 @@ func (m *MockMetricFileSaveRepository) Save(ctx context.Context, metric types.Me
 }
 
 // Save indicates an expected call of Save.
-func (mr *MockMetricFileSaveRepositoryMockRecorder) Save(ctx, metric interface{}) *gomock.Call {
+func (mr *MockMetricSaveFileRepositoryMockRecorder) Save(ctx, metric interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricFileSaveRepository)(nil).Save), ctx, metric)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricSaveFileRepository)(nil).Save), ctx, metric)
 }
 
-// MockMetricFileListAllRepository is a mock of MetricFileListAllRepository interface.
-type MockMetricFileListAllRepository struct {
+// MockMetricListAllFileRepository is a mock of MetricListAllFileRepository interface.
+type MockMetricListAllFileRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricFileListAllRepositoryMockRecorder
+	recorder *MockMetricListAllFileRepositoryMockRecorder
 }
 
-// MockMetricFileListAllRepositoryMockRecorder is the mock recorder for MockMetricFileListAllRepository.
-type MockMetricFileListAllRepositoryMockRecorder struct {
-	mock *MockMetricFileListAllRepository
+// MockMetricListAllFileRepositoryMockRecorder is the mock recorder for MockMetricListAllFileRepository.
+type MockMetricListAllFileRepositoryMockRecorder struct {
+	mock *MockMetricListAllFileRepository
 }
 
-// NewMockMetricFileListAllRepository creates a new mock instance.
-func NewMockMetricFileListAllRepository(ctrl *gomock.Controller) *MockMetricFileListAllRepository {
-	mock := &MockMetricFileListAllRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricFileListAllRepositoryMockRecorder{mock}
+// NewMockMetricListAllFileRepository creates a new mock instance.
+func NewMockMetricListAllFileRepository(ctrl *gomock.Controller) *MockMetricListAllFileRepository {
+	mock := &MockMetricListAllFileRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricListAllFileRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricFileListAllRepository) EXPECT() *MockMetricFileListAllRepositoryMockRecorder {
+func (m *MockMetricListAllFileRepository) EXPECT() *MockMetricListAllFileRepositoryMockRecorder {
 	return m.recorder
 }
 
 // ListAll mocks base method.
-func (m *MockMetricFileListAllRepository) ListAll(ctx context.Context) ([]types.Metrics, error) {
+func (m *MockMetricListAllFileRepository) ListAll(ctx context.Context) ([]types.Metrics, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListAll", ctx)
 	ret0, _ := ret[0].([]types.Metrics)
@@ -120,36 +120,36 @@ func (m *MockMetricFileListAllRepository) ListAll(ctx context.Context) ([]types.
 }
 
 // ListAll indicates an expected call of ListAll.
-func (mr *MockMetricFileListAllRepositoryMockRecorder) ListAll(ctx interface{}) *gomock.Call {
+func (mr *MockMetricListAllFileRepositoryMockRecorder) ListAll(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockMetricFileListAllRepository)(nil).ListAll), ctx)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockMetricListAllFileRepository)(nil).ListAll), ctx)
 }
 
-// MockMetricMemorySaveRepository is a mock of MetricMemorySaveRepository interface.
-type MockMetricMemorySaveRepository struct {
+// MockMetricSaveMemoryRepository is a mock of MetricSaveMemoryRepository interface.
+type MockMetricSaveMemoryRepository struct {
 	ctrl     *gomock.Controller
-	recorder *MockMetricMemorySaveRepositoryMockRecorder
+	recorder *MockMetricSaveMemoryRepositoryMockRecorder
 }
 
-// MockMetricMemorySaveRepositoryMockRecorder is the mock recorder for MockMetricMemorySaveRepository.
-type MockMetricMemorySaveRepositoryMockRecorder struct {
-	mock *MockMetricMemorySaveRepository
+// MockMetricSaveMemoryRepositoryMockRecorder is the mock recorder for MockMetricSaveMemoryRepository.
+type MockMetricSaveMemoryRepositoryMockRecorder struct {
+	mock *MockMetricSaveMemoryRepository
 }
 
-// NewMockMetricMemorySaveRepository creates a new mock instance.
-func NewMockMetricMemorySaveRepository(ctrl *gomock.Controller) *MockMetricMemorySaveRepository {
-	mock := &MockMetricMemorySaveRepository{ctrl: ctrl}
-	mock.recorder = &MockMetricMemorySaveRepositoryMockRecorder{mock}
+// NewMockMetricSaveMemoryRepository creates a new mock instance.
+func NewMockMetricSaveMemoryRepository(ctrl *gomock.Controller) *MockMetricSaveMemoryRepository {
+	mock := &MockMetricSaveMemoryRepository{ctrl: ctrl}
+	mock.recorder = &MockMetricSaveMemoryRepositoryMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockMetricMemorySaveRepository) EXPECT() *MockMetricMemorySaveRepositoryMockRecorder {
+func (m *MockMetricSaveMemoryRepository) EXPECT() *MockMetricSaveMemoryRepositoryMockRecorder {
 	return m.recorder
 }
 
 // Save mocks base method.
-func (m *MockMetricMemorySaveRepository) Save(ctx context.Context, metric types.Metrics) error {
+func (m *MockMetricSaveMemoryRepository) Save(ctx context.Context, metric types.Metrics) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Save", ctx, metric)
 	ret0, _ := ret[0].(error)
@@ -157,7 +157,7 @@ func (m *MockMetricMemorySaveRepository) Save(ctx context.Context, metric types.
 }
 
 // Save indicates an expected call of Save.
-func (mr *MockMetricMemorySaveRepositoryMockRecorder) Save(ctx, metric interface{}) *gomock.Call {
+func (mr *MockMetricSaveMemoryRepositoryMockRecorder) Save(ctx, metric interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricMemorySaveRepository)(nil).Save), ctx, metric)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockMetricSaveMemoryRepository)(nil).Save), ctx, metric)
 }

@@ -12,52 +12,48 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
-func run() error {
-	err := logger.Initialize(flagLogLevel)
-	if err != nil {
+func run(ctx context.Context, opts *options) error {
+	if err := logger.Initialize(opts.LogLevel); err != nil {
 		return err
 	}
 
 	metricsCh := make(chan types.Metrics, 1000)
 	defer close(metricsCh)
 
-	pollTicker := time.NewTicker(time.Duration(flagPollInterval) * time.Second)
+	pollTicker := time.NewTicker(time.Duration(opts.PollInterval) * time.Second)
 	defer pollTicker.Stop()
 
-	reportTicker := time.NewTicker(time.Duration(flagReportInterval) * time.Second)
+	reportTicker := time.NewTicker(time.Duration(opts.ReportInterval) * time.Second)
 	defer reportTicker.Stop()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	client := resty.New()
+	metricFacade := facades.NewMetricFacade(client, opts.ServerAddress, opts.ServerUpdateEndpoint)
+
+	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	client := resty.New()
+	grp, ctx := errgroup.WithContext(ctx)
 
-	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagServerUpdateEndpoint)
-
-	errCh := make(chan error, 1)
-
-	go func() {
-		errCh <- workers.StartMetricAgentWorker(
-			ctx,
-			metricFacade,
-			metricsCh,
-			pollTicker,
-			reportTicker,
-		)
-	}()
-
-	select {
-	case <-ctx.Done():
-		logger.Log.Info("Shutting down Metric Agent...")
-		return nil
-	case err := <-errCh:
+	grp.Go(func() error {
+		err := workers.StartMetricAgentWorker(ctx, metricFacade, metricsCh, pollTicker, reportTicker)
 		if err != nil {
-			logger.Log.Error("Worker exited with error: ", zap.Error(err))
-			return err
+			logger.Log.Error("Metric agent worker stopped with error", zap.Error(err))
+		} else {
+			logger.Log.Info("Metric agent worker stopped gracefully")
 		}
-		logger.Log.Info("Worker exited cleanly")
-		return nil
+		return err
+	})
+
+	err := grp.Wait()
+
+	if err != nil {
+		logger.Log.Error("Worker returned error", zap.Error(err))
+	} else {
+		logger.Log.Info("Shutdown gracefully")
 	}
+
+	return err
 }

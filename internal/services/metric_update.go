@@ -30,25 +30,22 @@ func NewMetricUpdateService(
 }
 
 func (svc *MetricUpdateService) Update(
-	ctx context.Context, metrics []types.Metrics,
+	ctx context.Context, metric types.Metrics,
 ) error {
-	for _, metric := range metrics {
-		currentMetric, err := svc.mfor.GetByID(ctx, metric.MetricID)
-		if err != nil {
+	currentMetric, err := svc.mfor.GetByID(ctx, metric.MetricID)
+	if err != nil {
+		return types.ErrMetricInternal
+	}
+	if currentMetric != nil {
+		strategy, ok := metricUpdateStrategies[metric.Type]
+		if !ok {
 			return types.ErrMetricInternal
 		}
-		if currentMetric != nil {
-			strategy, ok := metricUpdateStrategies[metric.Type]
-			if !ok {
-				return types.ErrMetricInternal
-			}
-			metric = strategy(*currentMetric, metric)
-		}
-
-		err = svc.msr.Save(ctx, metric)
-		if err != nil {
-			return types.ErrMetricInternal
-		}
+		metric = strategy(*currentMetric, metric)
+	}
+	err = svc.msr.Save(ctx, metric)
+	if err != nil {
+		return types.ErrMetricInternal
 	}
 	return nil
 }

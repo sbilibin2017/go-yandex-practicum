@@ -49,11 +49,8 @@ func consumeMetrics(
 			err := handler.Update(ctx, m)
 			if err != nil {
 				logger.Log.Error("Error updating metric", zap.String("id", m.ID), zap.Error(err))
-			} else {
-				logger.Log.Info("Successfully updated metric", zap.String("id", m.ID))
 			}
 		default:
-			logger.Log.Debug("No metrics to consume.")
 			return
 		}
 	}
@@ -105,8 +102,6 @@ func produceGaugeMetrics(ch chan types.Metrics) {
 		}
 		ch <- metric
 	}
-
-	logger.Log.Info("Gauge metrics produced.")
 }
 
 func produceCounterMetrics(ch chan types.Metrics) {
@@ -125,6 +120,4 @@ func produceCounterMetrics(ch chan types.Metrics) {
 		}
 		ch <- metric
 	}
-
-	logger.Log.Info("Counter metrics produced.")
 }

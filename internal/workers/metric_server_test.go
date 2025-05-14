@@ -16,10 +16,10 @@ func TestStartMetricServerWorker_SyncStore(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Mocks
-	memoryListRepo := NewMockMetricMemoryListAllRepository(ctrl)
-	memorySaveRepo := NewMockMetricMemorySaveRepository(ctrl)
-	fileListRepo := NewMockMetricFileListAllRepository(ctrl)
-	fileSaveRepo := NewMockMetricFileSaveRepository(ctrl)
+	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
+	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
+	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
+	fileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
 	// Test data
 	testMetrics := []types.Metrics{
@@ -49,10 +49,10 @@ func TestStartMetricServerWorker_AsyncStore(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Mocks
-	memoryListRepo := NewMockMetricMemoryListAllRepository(ctrl)
-	memorySaveRepo := NewMockMetricMemorySaveRepository(ctrl)
-	fileListRepo := NewMockMetricFileListAllRepository(ctrl)
-	fileSaveRepo := NewMockMetricFileSaveRepository(ctrl)
+	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
+	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
+	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
+	fileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
 	testMetrics := []types.Metrics{
 		{
@@ -80,10 +80,10 @@ func TestStartMetricServerWorker_RestoreEnabled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	memoryListRepo := NewMockMetricMemoryListAllRepository(ctrl)
-	memorySaveRepo := NewMockMetricMemorySaveRepository(ctrl)
-	fileListRepo := NewMockMetricFileListAllRepository(ctrl)
-	fileSaveRepo := NewMockMetricFileSaveRepository(ctrl)
+	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
+	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
+	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
+	fileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
 	testMetrics := []types.Metrics{
 		{
@@ -118,8 +118,8 @@ func TestSaveMetricsToFile(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockMemoryRepo := NewMockMetricMemoryListAllRepository(ctrl)
-	mockFileSaveRepo := NewMockMetricFileSaveRepository(ctrl)
+	mockMemoryRepo := NewMockMetricListAllMemoryRepository(ctrl)
+	mockFileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
 	metrics := []types.Metrics{
 		{
@@ -149,8 +149,8 @@ func TestSaveMetricsToFile_ErrorSavingMetric(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockMemoryRepo := NewMockMetricMemoryListAllRepository(ctrl)
-	mockFileSaveRepo := NewMockMetricFileSaveRepository(ctrl)
+	mockMemoryRepo := NewMockMetricListAllMemoryRepository(ctrl)
+	mockFileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
 	metrics := []types.Metrics{
 		{
@@ -176,8 +176,8 @@ func TestLoadMetricsFromFile(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockFileListRepo := NewMockMetricFileListAllRepository(ctrl)
-	mockMemorySaveRepo := NewMockMetricMemorySaveRepository(ctrl)
+	mockFileListRepo := NewMockMetricListAllFileRepository(ctrl)
+	mockMemorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 
 	metrics := []types.Metrics{
 		{
@@ -207,8 +207,8 @@ func TestLoadMetricsFromFile_ErrorSavingMetricToMemory(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockFileListRepo := NewMockMetricFileListAllRepository(ctrl)
-	mockMemorySaveRepo := NewMockMetricMemorySaveRepository(ctrl)
+	mockFileListRepo := NewMockMetricListAllFileRepository(ctrl)
+	mockMemorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 
 	metrics := []types.Metrics{
 		{

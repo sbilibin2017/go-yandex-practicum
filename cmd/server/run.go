@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	"github.com/pressly/goose"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
@@ -19,116 +20,181 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
-func run() error {
-	err := logger.Initialize(flagLogLevel)
-	if err != nil {
+func run(ctx context.Context, opts *options) error {
+	if err := logger.Initialize(opts.LogLevel); err != nil {
 		return err
 	}
 
-	metricsMap := make(map[types.MetricID]types.Metrics)
-
 	var file *os.File
-	if flagFileStoragePath != "" {
-		file, err = os.OpenFile(flagFileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+	if opts.FileStoragePath != "" {
+		var err error
+		file, err = os.OpenFile(opts.FileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
+		defer file.Close()
 	}
 
 	var db *sqlx.DB
-	if flagDatabaseDSN != "" {
-		db, err = sqlx.Connect("pgx", flagDatabaseDSN)
+	if opts.DatabaseDSN != "" {
+		var err error
+		db, err = sqlx.Connect("pgx", opts.DatabaseDSN)
 		if err != nil {
+			return err
+		}
+		defer db.Close()
+		if err := goose.SetDialect("postgres"); err != nil {
+			logger.Log.Error("Failed to set goose dialect", zap.Error(err))
+			return err
+		}
+		if err := goose.Up(db.DB, "./migrations"); err != nil {
+			logger.Log.Error("Failed to apply migrations", zap.Error(err))
 			return err
 		}
 	}
 
-	metricMemorySaveRepository := repositories.NewMetricMemorySaveRepository(metricsMap)
-	metricMemoryGetByIDRepository := repositories.NewMetricMemoryGetByIDRepository(metricsMap)
-	metricMemoryListAllRepository := repositories.NewMetricMemoryListAllRepository(metricsMap)
-	metricFileListAllRepository := repositories.NewMetricFileListAllRepository(file)
-	metricFileSaveRepository := repositories.NewMetricFileSaveRepository(file)
+	var storeTicker *time.Ticker
+	if opts.StoreInterval > 0 {
+		storeTicker = time.NewTicker(time.Duration(opts.StoreInterval) * time.Second)
+		defer storeTicker.Stop()
+	}
 
-	metricUpdateService := services.NewMetricUpdateService(metricMemoryGetByIDRepository, metricMemorySaveRepository)
-	metricGetService := services.NewMetricGetService(metricMemoryGetByIDRepository)
-	metricListAllService := services.NewMetricListAllService(metricMemoryListAllRepository)
+	var (
+		metricListAllFileRepository *repositories.MetricListAllFileRepository
+		metricGetByIDFileRepository *repositories.MetricGetByIDFileRepository
+		metricSaveFileRepository    *repositories.MetricSaveFileRepository
+	)
+	if file != nil {
+		metricListAllFileRepository = repositories.NewMetricListAllFileRepository(file)
+		metricGetByIDFileRepository = repositories.NewMetricGetByIDFileRepository(file)
+		metricSaveFileRepository = repositories.NewMetricSaveFileRepository(file)
+	}
 
-	metricUpdatePathHandler := handlers.NewMetricUpdatePathHandler(metricUpdateService)
-	metricUpdateBodyHandler := handlers.NewMetricUpdateBodyHandler(metricUpdateService)
-	metricGetPathHandler := handlers.NewMetricGetPathHandler(metricGetService)
-	metricGetBodyHandler := handlers.NewMetricGetBodyHandler(metricGetService)
-	metricListAllHandler := handlers.NewMetricListAllHTMLHandler(metricListAllService)
-	dbPingHandler := handlers.NewDBPingHandler(db)
+	var (
+		metricListAllDBRepository *repositories.MetricListAllDBRepository
+		metricGetByIDDBRepository *repositories.MetricGetByIDDBRepository
+		metricSaveDBRepository    *repositories.MetricSaveDBRepository
+	)
+	if db != nil {
+		metricListAllDBRepository = repositories.NewMetricListAllDBRepository(db, middlewares.GetTx)
+		metricGetByIDDBRepository = repositories.NewMetricGetByIDDBRepository(db, middlewares.GetTx)
+		metricSaveDBRepository = repositories.NewMetricSaveDBRepository(db, middlewares.GetTx)
+	}
+
+	var (
+		metricListAllMemoryRepository *repositories.MetricListAllMemoryRepository
+		metricGetByIDMemoryRepository *repositories.MetricGetByIDMemoryRepository
+		metricSaveMemoryRepository    *repositories.MetricSaveMemoryRepository
+	)
+	if file == nil && db == nil {
+		metricsMap := make(map[types.MetricID]types.Metrics)
+		metricListAllMemoryRepository = repositories.NewMetricListAllMemoryRepository(metricsMap)
+		metricGetByIDMemoryRepository = repositories.NewMetricGetByIDMemoryRepository(metricsMap)
+		metricSaveMemoryRepository = repositories.NewMetricSaveMemoryRepository(metricsMap)
+	}
+
+	metricListAllContextRepository := repositories.NewMetricListAllContextRepository()
+	metricGetByIDContextRepository := repositories.NewMetricGetByIDContextRepository()
+	metricSaveContextRepository := repositories.NewMetricSaveContextRepository()
+
+	switch {
+	case db != nil:
+		metricListAllContextRepository.SetContext(metricListAllDBRepository)
+		metricGetByIDContextRepository.SetContext(metricGetByIDDBRepository)
+		metricSaveContextRepository.SetContext(metricSaveDBRepository)
+	case file != nil:
+		metricListAllContextRepository.SetContext(metricListAllFileRepository)
+		metricGetByIDContextRepository.SetContext(metricGetByIDFileRepository)
+		metricSaveContextRepository.SetContext(metricSaveFileRepository)
+	default:
+		metricListAllContextRepository.SetContext(metricListAllMemoryRepository)
+		metricGetByIDContextRepository.SetContext(metricGetByIDMemoryRepository)
+		metricSaveContextRepository.SetContext(metricSaveMemoryRepository)
+	}
+
+	metricUpdateService := services.NewMetricUpdateService(metricGetByIDContextRepository, metricSaveContextRepository)
+	metricGetService := services.NewMetricGetService(metricGetByIDContextRepository)
+	metricListAllService := services.NewMetricListAllService(metricListAllContextRepository)
 
 	router := chi.NewRouter()
 	router.Use(
 		middlewares.LoggingMiddleware,
 		middlewares.GzipMiddleware,
+		middlewares.TxMiddleware(db),
 	)
-	router.Post("/update/{type}/{name}/{value}", metricUpdatePathHandler)
-	router.Post("/update/", metricUpdateBodyHandler)
-	router.Get("/value/{type}/{name}", metricGetPathHandler)
-	router.Post("/value/", metricGetBodyHandler)
-	router.Get("/", metricListAllHandler)
-	router.Get("/ping", dbPingHandler)
+	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdateService))
+	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdateService))
+	router.Get("/value/{type}/{name}", handlers.NewMetricGetPathHandler(metricGetService))
+	router.Post("/value/", handlers.NewMetricGetBodyHandler(metricGetService))
+	router.Get("/", handlers.NewMetricListAllHTMLHandler(metricListAllService))
+	router.Get("/ping", handlers.NewDBPingHandler(db))
 
-	server := &http.Server{Addr: flagServerAddress, Handler: router}
+	server := &http.Server{
+		Addr:    opts.ServerAddress,
+		Handler: router,
+	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var storeTicker *time.Ticker
-	if flagStoreInterval != 0 {
-		storeTicker = time.NewTicker(time.Duration(flagStoreInterval) * time.Second)
+	grp, ctx := errgroup.WithContext(ctx)
+
+	if metricListAllFileRepository != nil && metricSaveFileRepository != nil {
+		grp.Go(func() error {
+			return workers.StartMetricServerWorker(
+				ctx,
+				metricListAllContextRepository,
+				metricSaveContextRepository,
+				metricListAllFileRepository,
+				metricSaveFileRepository,
+				storeTicker,
+				opts.Restore,
+			)
+		})
 	}
 
-	go workers.StartMetricServerWorker(
-		ctx,
-		metricMemoryListAllRepository,
-		metricMemorySaveRepository,
-		metricFileListAllRepository,
-		metricFileSaveRepository,
-		storeTicker,
-		flagRestore,
-	)
+	grp.Go(func() error {
+		logger.Log.Info("Starting HTTP server", zap.String("addr", server.Addr))
 
-	errCh := make(chan error, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			err := server.ListenAndServe()
+			if err != nil && err != http.ErrServerClosed {
+				logger.Log.Error("Server ListenAndServe error", zap.Error(err))
+				errCh <- err
+			} else {
+				logger.Log.Info("Server stopped listening", zap.Error(err))
+			}
+			close(errCh)
+		}()
 
-	go func() {
-		logger.Log.Info("Starting server...")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-			return
-		}
-		errCh <- nil
-	}()
+		select {
+		case <-ctx.Done():
+			logger.Log.Info("Context done, shutting down server")
 
-	select {
-	case <-ctx.Done():
-		ctxShutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
 
-		logger.Log.Info("Shutting down server gracefully...")
-		if err := server.Shutdown(ctxShutdown); err != nil {
-			logger.Log.Error("Server shutdown error", zap.Error(err))
-		}
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				logger.Log.Error("Error during server shutdown", zap.Error(err))
+				return err
+			}
+			logger.Log.Info("Server shutdown complete")
+			return nil
 
-	case err := <-errCh:
-		if err != nil {
-			logger.Log.Error("Server failed to start", zap.Error(err))
+		case err := <-errCh:
+			if err != nil {
+				logger.Log.Error("Server error received from errCh", zap.Error(err))
+			} else {
+				logger.Log.Info("Server exited without error")
+			}
 			return err
 		}
-	}
+	})
 
-	if storeTicker != nil {
-		storeTicker.Stop()
-	}
-	if file != nil {
-		file.Close()
-		logger.Log.Info("Storage file closed")
-	}
-
-	return nil
+	err := grp.Wait()
+	return err
 }

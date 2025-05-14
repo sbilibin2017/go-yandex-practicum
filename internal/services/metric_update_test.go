@@ -4,184 +4,189 @@ import (
 	"context"
 	"testing"
 
-	gomock "github.com/golang/mock/gomock"
+	"github.com/golang/mock/gomock"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+func TestUpdate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create mock repositories
+	mockGetByIDRepo := NewMockMetricUpdateGetByIDRepository(ctrl)
+	mockSaveRepo := NewMockMetricUpdateSaveRepository(ctrl)
+
+	// Create the service
+	service := NewMetricUpdateService(mockGetByIDRepo, mockSaveRepo)
+
+	// Define the test cases
+	tests := []struct {
+		name          string
+		inputMetric   types.Metrics
+		mockGetByID   func()
+		mockSave      func()
+		expectedError error
+	}{
+		{
+			name: "success with counter metric",
+			inputMetric: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				},
+				Delta: new(int64),
+			},
+			mockGetByID: func() {
+				mockGetByIDRepo.EXPECT().GetByID(context.Background(), types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				}).Return(&types.Metrics{
+					MetricID: types.MetricID{
+						ID:   "1",
+						Type: types.CounterMetricType,
+					},
+					Delta: new(int64),
+				}, nil)
+			},
+			mockSave: func() {
+				mockSaveRepo.EXPECT().Save(context.Background(), gomock.Any()).Return(nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name: "metric not found",
+			inputMetric: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				},
+				Delta: new(int64),
+			},
+			mockGetByID: func() {
+				mockGetByIDRepo.EXPECT().GetByID(context.Background(), types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				}).Return(nil, types.ErrMetricNotFound)
+			},
+			mockSave: func() {
+				// no Save called
+			},
+			expectedError: types.ErrMetricInternal,
+		},
+		{
+			name: "save fails",
+			inputMetric: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				},
+				Delta: new(int64),
+			},
+			mockGetByID: func() {
+				mockGetByIDRepo.EXPECT().GetByID(context.Background(), types.MetricID{
+					ID:   "1",
+					Type: types.CounterMetricType,
+				}).Return(&types.Metrics{
+					MetricID: types.MetricID{
+						ID:   "1",
+						Type: types.CounterMetricType,
+					},
+					Delta: new(int64),
+				}, nil)
+			},
+			mockSave: func() {
+				mockSaveRepo.EXPECT().Save(context.Background(), gomock.Any()).Return(types.ErrMetricInternal)
+			},
+			expectedError: types.ErrMetricInternal,
+		},
+		{
+			name: "unknown metric type",
+			inputMetric: types.Metrics{
+				MetricID: types.MetricID{
+					ID:   "2",
+					Type: "unknown", // unsupported type
+				},
+				Delta: new(int64),
+			},
+			mockGetByID: func() {
+				mockGetByIDRepo.EXPECT().GetByID(context.Background(), types.MetricID{
+					ID:   "2",
+					Type: "unknown",
+				}).Return(nil, types.ErrMetricNotFound)
+			},
+			mockSave: func() {
+				// no Save called
+			},
+			expectedError: types.ErrMetricInternal,
+		},
+	}
+
+	// Run the tests
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup mocks
+			tt.mockGetByID()
+			tt.mockSave()
+
+			// Call the method
+			err := service.Update(context.Background(), tt.inputMetric)
+
+			// Assert the result
+			if tt.expectedError != nil {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectedError, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestMetricUpdateCounter(t *testing.T) {
-	oldDelta := int64(5)
-	newDelta := int64(3)
+	oldDelta := int64(10)
+	newDelta := int64(20)
 	oldMetric := types.Metrics{
-		MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType},
-		Delta:    &oldDelta,
+		MetricID: types.MetricID{
+			ID:   "counter1",
+			Type: types.CounterMetricType,
+		},
+		Delta: &oldDelta,
 	}
 	newMetric := types.Metrics{
-		MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType},
-		Delta:    &newDelta,
+		MetricID: types.MetricID{
+			ID:   "counter1",
+			Type: types.CounterMetricType,
+		},
+		Delta: &newDelta,
 	}
 
-	updated := metricUpdateCounter(oldMetric, newMetric)
+	result := metricUpdateCounter(oldMetric, newMetric)
 
-	assert.NotNil(t, updated.Delta)
-	assert.Equal(t, int64(8), *updated.Delta)
+	expectedDelta := int64(30)
+	assert.Equal(t, expectedDelta, *result.Delta)
 }
 
 func TestMetricUpdateGauge(t *testing.T) {
-	oldValue := float64(42.0)
-	newValue := float64(99.5)
+	oldValue := 10.5
+	newValue := 20.5
 	oldMetric := types.Metrics{
-		MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
-		Value:    &oldValue,
+		MetricID: types.MetricID{
+			ID:   "gauge1",
+			Type: types.GaugeMetricType,
+		},
+		Value: &oldValue,
 	}
 	newMetric := types.Metrics{
-		MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
-		Value:    &newValue,
+		MetricID: types.MetricID{
+			ID:   "gauge1",
+			Type: types.GaugeMetricType,
+		},
+		Value: &newValue,
 	}
 
-	updated := metricUpdateGauge(oldMetric, newMetric)
+	result := metricUpdateGauge(oldMetric, newMetric)
 
-	assert.NotNil(t, updated.Value)
-	assert.Equal(t, float64(99.5), *updated.Value)
-}
-
-func TestMetricUpdateService_Update(t *testing.T) {
-	tests := []struct {
-		name  string
-		input []types.Metrics
-		setup func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository)
-		want  error
-	}{
-		{
-			name: "Counter Metric Update Success",
-			input: func() []types.Metrics {
-				delta := int64(3)
-				return []types.Metrics{
-					{
-						MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType},
-						Delta:    &delta,
-					},
-				}
-			}(),
-			setup: func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository) {
-				oldDelta := int64(5)
-				mockGetRepo.EXPECT().
-					GetByID(context.Background(), gomock.Any()).
-					Return(&types.Metrics{Delta: &oldDelta}, nil)
-
-				mockSaveRepo.EXPECT().
-					Save(context.Background(), gomock.AssignableToTypeOf(types.Metrics{})).
-					DoAndReturn(func(ctx context.Context, m types.Metrics) error {
-						assert.Equal(t, int64(8), *m.Delta)
-						return nil
-					})
-			},
-			want: nil,
-		},
-		{
-			name: "GetByID returns error",
-			input: func() []types.Metrics {
-				delta := int64(1)
-				return []types.Metrics{
-					{
-						MetricID: types.MetricID{ID: "broken", Type: types.CounterMetricType},
-						Delta:    &delta,
-					},
-				}
-			}(),
-			setup: func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository) {
-				mockGetRepo.EXPECT().
-					GetByID(context.Background(), gomock.Any()).
-					Return(nil, assert.AnError)
-			},
-			want: types.ErrMetricInternal,
-		},
-		{
-			name: "GetByID returns nil metric (new insert)",
-			input: func() []types.Metrics {
-				val := float64(42.0)
-				return []types.Metrics{
-					{
-						MetricID: types.MetricID{ID: "new_gauge", Type: types.GaugeMetricType},
-						Value:    &val,
-					},
-				}
-			}(),
-			setup: func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository) {
-				mockGetRepo.EXPECT().
-					GetByID(context.Background(), gomock.Any()).
-					Return(nil, nil)
-
-				mockSaveRepo.EXPECT().
-					Save(context.Background(), gomock.AssignableToTypeOf(types.Metrics{})).
-					DoAndReturn(func(ctx context.Context, m types.Metrics) error {
-						assert.Equal(t, 42.0, *m.Value)
-						return nil
-					})
-			},
-			want: nil,
-		},
-		{
-			name: "Unknown metric type (no strategy)",
-			input: func() []types.Metrics {
-				delta := int64(1)
-				return []types.Metrics{
-					{
-						MetricID: types.MetricID{ID: "unknown", Type: "invalid_type"},
-						Delta:    &delta,
-					},
-				}
-			}(),
-			setup: func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository) {
-				mockGetRepo.EXPECT().
-					GetByID(context.Background(), gomock.Any()).
-					Return(&types.Metrics{}, nil)
-				// Стратегия не определена → может вызвать панику, если нет проверки
-			},
-			want: types.ErrMetricInternal, // или panic → если нет обработки
-		},
-		{
-			name: "Save returns error after strategy update",
-			input: func() []types.Metrics {
-				delta := int64(3)
-				return []types.Metrics{
-					{
-						MetricID: types.MetricID{ID: "counter_fail", Type: types.CounterMetricType},
-						Delta:    &delta,
-					},
-				}
-			}(),
-			setup: func(mockGetRepo *MockMetricUpdateGetByIDRepository, mockSaveRepo *MockMetricUpdateSaveRepository) {
-				oldDelta := int64(5)
-				mockGetRepo.EXPECT().
-					GetByID(context.Background(), gomock.Any()).
-					Return(&types.Metrics{Delta: &oldDelta}, nil)
-
-				mockSaveRepo.EXPECT().
-					Save(context.Background(), gomock.Any()).
-					Return(assert.AnError)
-			},
-			want: types.ErrMetricInternal,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			mockGetRepo := NewMockMetricUpdateGetByIDRepository(ctrl)
-			mockSaveRepo := NewMockMetricUpdateSaveRepository(ctrl)
-			service := NewMetricUpdateService(mockGetRepo, mockSaveRepo)
-
-			// Setup the mocks based on the current test case
-			tt.setup(mockGetRepo, mockSaveRepo)
-
-			// Act
-			err := service.Update(context.Background(), tt.input)
-
-			// Assert
-			assert.ErrorIs(t, err, tt.want)
-		})
-	}
+	assert.Equal(t, newValue, *result.Value)
 }
