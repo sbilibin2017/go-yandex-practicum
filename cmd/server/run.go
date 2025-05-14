@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jmoiron/sqlx"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
@@ -35,42 +37,42 @@ func run() error {
 		}
 	}
 
+	var db *sqlx.DB
+	if flagDatabaseDSN != "" {
+		db, err = sqlx.Connect("pgx", flagDatabaseDSN)
+		if err != nil {
+			return err
+		}
+	}
+
 	metricMemorySaveRepository := repositories.NewMetricMemorySaveRepository(metricsMap)
 	metricMemoryGetByIDRepository := repositories.NewMetricMemoryGetByIDRepository(metricsMap)
 	metricMemoryListAllRepository := repositories.NewMetricMemoryListAllRepository(metricsMap)
 	metricFileListAllRepository := repositories.NewMetricFileListAllRepository(file)
 	metricFileSaveRepository := repositories.NewMetricFileSaveRepository(file)
 
-	metricUpdateService := services.NewMetricUpdateService(
-		metricMemoryGetByIDRepository,
-		metricMemorySaveRepository,
-	)
-	metricGetService := services.NewMetricGetService(
-		metricMemoryGetByIDRepository,
-	)
-	metricListAllService := services.NewMetricListAllService(
-		metricMemoryListAllRepository,
-	)
+	metricUpdateService := services.NewMetricUpdateService(metricMemoryGetByIDRepository, metricMemorySaveRepository)
+	metricGetService := services.NewMetricGetService(metricMemoryGetByIDRepository)
+	metricListAllService := services.NewMetricListAllService(metricMemoryListAllRepository)
 
 	metricUpdatePathHandler := handlers.NewMetricUpdatePathHandler(metricUpdateService)
 	metricUpdateBodyHandler := handlers.NewMetricUpdateBodyHandler(metricUpdateService)
 	metricGetPathHandler := handlers.NewMetricGetPathHandler(metricGetService)
 	metricGetBodyHandler := handlers.NewMetricGetBodyHandler(metricGetService)
 	metricListAllHandler := handlers.NewMetricListAllHTMLHandler(metricListAllService)
+	dbPingHandler := handlers.NewDBPingHandler(db)
 
-	metricRouter := chi.NewRouter()
-	metricRouter.Use(
+	router := chi.NewRouter()
+	router.Use(
 		middlewares.LoggingMiddleware,
 		middlewares.GzipMiddleware,
 	)
-	metricRouter.Post("/update/{type}/{name}/{value}", metricUpdatePathHandler)
-	metricRouter.Post("/update/", metricUpdateBodyHandler)
-	metricRouter.Get("/value/{type}/{name}", metricGetPathHandler)
-	metricRouter.Post("/value/", metricGetBodyHandler)
-	metricRouter.Get("/", metricListAllHandler)
-
-	router := chi.NewRouter()
-	router.Mount("/", metricRouter)
+	router.Post("/update/{type}/{name}/{value}", metricUpdatePathHandler)
+	router.Post("/update/", metricUpdateBodyHandler)
+	router.Get("/value/{type}/{name}", metricGetPathHandler)
+	router.Post("/value/", metricGetBodyHandler)
+	router.Get("/", metricListAllHandler)
+	router.Get("/ping", dbPingHandler)
 
 	server := &http.Server{Addr: flagServerAddress, Handler: router}
 

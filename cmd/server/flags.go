@@ -12,6 +12,7 @@ var (
 	flagStoreInterval   int
 	flagFileStoragePath string
 	flagRestore         bool
+	flagDatabaseDSN     string
 )
 
 func parseFlags() {
@@ -20,6 +21,7 @@ func parseFlags() {
 	flag.IntVar(&flagStoreInterval, "i", 300, "Interval (in seconds) to save server state to disk (default 300, 0 for synchronous)")
 	flag.StringVar(&flagFileStoragePath, "f", "", "File path to save the server state (default empty, specify the file path using this flag)")
 	flag.BoolVar(&flagRestore, "r", false, "Whether to restore server state from file (true/false)")
+	flag.StringVar(&flagDatabaseDSN, "d", "", "PostgreSQL DSN (e.g., postgres://user:pass@localhost:5432/dbname)") // Новый флаг
 
 	flag.Parse()
 
@@ -41,5 +43,8 @@ func parseFlags() {
 		if restore, err := strconv.ParseBool(envRestore); err == nil {
 			flagRestore = restore
 		}
+	}
+	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" && flagDatabaseDSN == "" {
+		flagDatabaseDSN = envDatabaseDSN
 	}
 }
