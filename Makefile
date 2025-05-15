@@ -2,7 +2,7 @@ build-server:
 	go build -o ./bin/server ./cmd/server
 
 run-server-db:
-	./bin/server -d "postgres://user:password@localhost:5432/db?sslmode=disable"
+	./bin/server -d "postgres://user:password@localhost:5432/db?sslmode=disable" 
 
 run-server-file:
 	./bin/server -f "./metrics.json"
@@ -14,7 +14,7 @@ build-agent:
 	go build -o ./bin/agent ./cmd/agent
 
 run-agent:
-	./bin/agent
+	./bin/agent -k "key"
 
 mockgen:	
 	mockgen -source=$(file) \
