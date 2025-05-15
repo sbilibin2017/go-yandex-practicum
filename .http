@@ -11,6 +11,24 @@ Host: localhost:8080
 Content-Type: text/plain
 Content-Length: 0
 
+POST /updates/ HTTP/1.1
+Host: localhost:8080
+Accept: application/json
+Content-Type: application/json
+
+[
+  {
+    "id": "testCounter2",
+    "type": "counter",
+    "delta": 100
+  },
+  {
+    "id": "testCounter2",
+    "type": "counter",
+    "delta": 100
+  }
+]
+
 POST /update/ HTTP/1.1
 Host: localhost:8080
 Accept: application/json
@@ -21,6 +39,7 @@ Content-Type: application/json
   "type": "counter",
   "delta": 100
 }
+  
 
 
 POST /value/ HTTP/1.1

@@ -35,16 +35,17 @@ func (m *MockMetricUpdatePathService) EXPECT() *MockMetricUpdatePathServiceMockR
 	return m.recorder
 }
 
-// Update mocks base method.
-func (m *MockMetricUpdatePathService) Update(ctx context.Context, metrics types.Metrics) error {
+// Updates mocks base method.
+func (m *MockMetricUpdatePathService) Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, metrics)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "Updates", ctx, metrics)
+	ret0, _ := ret[0].([]types.Metrics)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// Update indicates an expected call of Update.
-func (mr *MockMetricUpdatePathServiceMockRecorder) Update(ctx, metrics interface{}) *gomock.Call {
+// Updates indicates an expected call of Updates.
+func (mr *MockMetricUpdatePathServiceMockRecorder) Updates(ctx, metrics interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockMetricUpdatePathService)(nil).Update), ctx, metrics)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Updates", reflect.TypeOf((*MockMetricUpdatePathService)(nil).Updates), ctx, metrics)
 }

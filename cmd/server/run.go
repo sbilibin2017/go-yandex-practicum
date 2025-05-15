@@ -115,7 +115,7 @@ func run(ctx context.Context, opts *options) error {
 		metricSaveContextRepository.SetContext(metricSaveMemoryRepository)
 	}
 
-	metricUpdateService := services.NewMetricUpdateService(metricGetByIDContextRepository, metricSaveContextRepository)
+	metricUpdatesService := services.NewMetricUpdatesService(metricGetByIDContextRepository, metricSaveContextRepository)
 	metricGetService := services.NewMetricGetService(metricGetByIDContextRepository)
 	metricListAllService := services.NewMetricListAllService(metricListAllContextRepository)
 
@@ -125,8 +125,9 @@ func run(ctx context.Context, opts *options) error {
 		middlewares.GzipMiddleware,
 		middlewares.TxMiddleware(db),
 	)
-	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdateService))
-	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdateService))
+	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
+	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdatesService))
+	router.Post("/updates/", handlers.NewMetricUpdatesBodyHandler(metricUpdatesService))
 	router.Get("/value/{type}/{name}", handlers.NewMetricGetPathHandler(metricGetService))
 	router.Post("/value/", handlers.NewMetricGetBodyHandler(metricGetService))
 	router.Get("/", handlers.NewMetricListAllHTMLHandler(metricListAllService))

@@ -30,7 +30,7 @@ func run(ctx context.Context, opts *options) error {
 	defer reportTicker.Stop()
 
 	client := resty.New()
-	metricFacade := facades.NewMetricFacade(client, opts.ServerAddress, opts.ServerUpdateEndpoint)
+	metricFacade := facades.NewMetricFacade(client, opts.ServerAddress)
 
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

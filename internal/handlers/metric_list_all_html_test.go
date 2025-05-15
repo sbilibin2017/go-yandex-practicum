@@ -80,3 +80,16 @@ func floatPtr(v float64) *float64 {
 func intPtr(v int64) *int64 {
 	return &v
 }
+
+func TestNewMetricsHTML(t *testing.T) {
+	delta := int64(100)
+	value := 45.5
+	metrics := []types.Metrics{
+		{MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType}, Delta: &delta},
+		{MetricID: types.MetricID{ID: "cpu", Type: types.GaugeMetricType}, Value: &value},
+	}
+	html := newMetricsHTML(metrics)
+	assert.Contains(t, html, "<li>requests: 100</li>")
+	assert.Contains(t, html, "<li>cpu: 45.5</li>")
+	assert.Contains(t, html, "<html>")
+}

@@ -1,147 +1,165 @@
-package handlers_test
+package handlers
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetricUpdateBodyHandler(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-	mockService := handlers.NewMockMetricUpdateBodyService(ctrl)
-	handler := handlers.NewMetricUpdateBodyHandler(mockService)
-	tests := []struct {
+func TestNewMetricUpdateBodyHandler(t *testing.T) {
+	type testCase struct {
 		name           string
-		metric         types.Metrics
-		mockSetup      func()
+		body           interface{}
+		mockService    func(m *MockMetricUpdateBodyService)
 		expectedStatus int
 		expectedBody   string
-	}{
+	}
+
+	counterDelta := int64(5)
+	gaugeValue := 3.14
+	successResp := []types.Metrics{
 		{
-			name: "Valid Counter Metric",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "counter1",
-					Type: types.CounterMetricType,
-				},
-				Delta: ptrInt64(10),
+			MetricID: types.MetricID{ID: "cpu", Type: types.CounterMetricType},
+			Delta:    &counterDelta,
+		},
+	}
+
+	tests := []testCase{
+		{
+			name: "valid counter metric",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "cpu", Type: types.CounterMetricType},
+				Delta:    &counterDelta,
 			},
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			mockService: func(m *MockMetricUpdateBodyService) {
+				m.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return(successResp, nil)
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"counter1","type":"counter","delta":10}`,
 		},
 		{
-			name: "Valid Gauge Metric",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "gauge1",
-					Type: types.GaugeMetricType,
-				},
-				Value: ptrFloat64(10.5),
+			name: "valid gauge metric",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "memory", Type: types.GaugeMetricType},
+				Value:    &gaugeValue,
 			},
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			mockService: func(m *MockMetricUpdateBodyService) {
+				m.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return([]types.Metrics{
+						{
+							MetricID: types.MetricID{ID: "memory", Type: types.GaugeMetricType},
+							Value:    &gaugeValue,
+						},
+					}, nil)
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"gauge1","type":"gauge","value":10.5}`,
 		},
 		{
-			name: "Missing Metric ID",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "",
-					Type: types.CounterMetricType,
-				},
-				Delta: ptrInt64(10),
+			name:           "invalid JSON",
+			body:           `{"invalid`,
+			mockService:    nil,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Invalid JSON body\n",
+		},
+		{
+			name: "missing metric id",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "", Type: types.CounterMetricType},
+				Delta:    &counterDelta,
 			},
-			mockSetup:      func() {},
+			mockService:    nil,
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   "Metric id is required",
+			expectedBody:   "Metric id is required\n",
 		},
 		{
-			name: "Invalid Metric Type",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "invalid1",
-					Type: "invalid",
-				},
-				Delta: ptrInt64(10),
+			name: "missing delta in counter",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "cpu", Type: types.CounterMetricType},
 			},
-			mockSetup:      func() {},
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid metric type",
+			expectedBody:   "Metric delta is required for counter\n",
 		},
 		{
-			name: "Metric Delta Missing for Counter",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "counter1",
-					Type: types.CounterMetricType,
-				},
-				Delta: nil,
+			name: "missing value in gauge",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "mem", Type: types.GaugeMetricType},
 			},
-			mockSetup:      func() {},
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Metric delta is required for counter",
+			expectedBody:   "Metric value is required for gauge\n",
 		},
 		{
-			name: "Metric Value Missing for Gauge",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "gauge1",
-					Type: types.GaugeMetricType,
-				},
-				Value: nil,
+			name: "invalid metric type",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "unknown", Type: "other"},
 			},
-			mockSetup:      func() {},
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Metric value is required for gauge",
+			expectedBody:   "Invalid metric type\n",
 		},
 		{
-			name: "Service Update Error",
-			metric: types.Metrics{
-				MetricID: types.MetricID{
-					ID:   "counter1",
-					Type: types.CounterMetricType,
-				},
-				Delta: ptrInt64(10),
+			name: "service error",
+			body: types.Metrics{
+				MetricID: types.MetricID{ID: "cpu", Type: types.CounterMetricType},
+				Delta:    &counterDelta,
 			},
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(types.ErrMetricInternal).Times(1)
+			mockService: func(m *MockMetricUpdateBodyService) {
+				m.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return(nil, errors.New("some error"))
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Metric not updated",
+			expectedBody:   "Metric not updated\n",
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.mockSetup()
-			body, err := json.Marshal(tt.metric)
-			assert.NoError(t, err)
-			req := httptest.NewRequest(http.MethodPost, "/metrics/update", bytes.NewReader(body))
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			assert.Equal(t, tt.expectedStatus, rec.Code)
-			assert.Equal(t, strings.TrimSpace(tt.expectedBody), strings.TrimSpace(rec.Body.String()))
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockService := NewMockMetricUpdateBodyService(ctrl)
+			if tc.mockService != nil {
+				tc.mockService(mockService)
+			}
+
+			handler := NewMetricUpdateBodyHandler(mockService)
+
+			var reqBody []byte
+			switch b := tc.body.(type) {
+			case string:
+				reqBody = []byte(b)
+			default:
+				var err error
+				reqBody, err = json.Marshal(b)
+				assert.NoError(t, err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewBuffer(reqBody))
+			w := httptest.NewRecorder()
+
+			handler(w, req)
+
+			resp := w.Result()
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
+
+			if tc.expectedBody != "" {
+				buf := new(bytes.Buffer)
+				_, _ = buf.ReadFrom(resp.Body)
+				assert.Equal(t, tc.expectedBody, buf.String())
+			}
 		})
 	}
-}
-
-func ptrInt64(i int64) *int64 {
-	return &i
-}
-
-func ptrFloat64(f float64) *float64 {
-	return &f
 }

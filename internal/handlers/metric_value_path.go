@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
@@ -41,9 +42,23 @@ func NewMetricGetPathHandler(
 			return
 		}
 
-		value := types.NewMetricStringValue(*metric)
+		value := newMetricStringValue(*metric)
 
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(value))
 	}
+}
+
+func newMetricStringValue(m types.Metrics) string {
+	var value string
+	if m.Type == types.CounterMetricType {
+		if m.Delta != nil {
+			value = strconv.FormatInt(*m.Delta, 10)
+		}
+	} else if m.Type == types.GaugeMetricType {
+		if m.Value != nil {
+			value = strconv.FormatFloat(*m.Value, 'f', -1, 64)
+		}
+	}
+	return value
 }

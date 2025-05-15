@@ -17,14 +17,12 @@ func TestParseFlagsWithFlags(t *testing.T) {
 	os.Args = []string{
 		"test",
 		"-a", "http://localhost:9090",
-		"-u", "/newupdate",
 		"-p", "5",
 		"-r", "15",
 		"-l", "debug",
 	}
 	opts := parseFlags()
 	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, "/newupdate", opts.ServerUpdateEndpoint)
 	assert.Equal(t, 5, opts.PollInterval)
 	assert.Equal(t, 15, opts.ReportInterval)
 	assert.Equal(t, "debug", opts.LogLevel)
@@ -33,7 +31,6 @@ func TestParseFlagsWithFlags(t *testing.T) {
 func TestParseFlagsWithEnvironmentVariables(t *testing.T) {
 	resetFlags()
 	os.Setenv(envAddress, "http://localhost:9090")
-	os.Setenv(envUpdateEndpoint, "/newupdate")
 	os.Setenv(envPollInterval, "5")
 	os.Setenv(envReportInterval, "15")
 	os.Setenv(envLogLevel, "debug")
@@ -41,13 +38,11 @@ func TestParseFlagsWithEnvironmentVariables(t *testing.T) {
 
 	opts := parseFlags()
 	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, "/newupdate", opts.ServerUpdateEndpoint)
 	assert.Equal(t, 5, opts.PollInterval)
 	assert.Equal(t, 15, opts.ReportInterval)
 	assert.Equal(t, "debug", opts.LogLevel)
 
 	os.Unsetenv(envAddress)
-	os.Unsetenv(envUpdateEndpoint)
 	os.Unsetenv(envPollInterval)
 	os.Unsetenv(envReportInterval)
 	os.Unsetenv(envLogLevel)
@@ -56,7 +51,6 @@ func TestParseFlagsWithEnvironmentVariables(t *testing.T) {
 func TestParseFlagsWithEnvironmentVariablesAndFlags(t *testing.T) {
 	resetFlags()
 	os.Setenv(envAddress, "http://localhost:9090")
-	os.Setenv(envUpdateEndpoint, "/newupdate")
 	os.Setenv(envPollInterval, "5")
 	os.Setenv(envReportInterval, "15")
 	os.Setenv(envLogLevel, "debug")
@@ -64,7 +58,6 @@ func TestParseFlagsWithEnvironmentVariablesAndFlags(t *testing.T) {
 	os.Args = []string{
 		"test",
 		"-a", "http://localhost:8080",
-		"-u", "/differentupdate",
 		"-p", "10",
 		"-r", "20",
 		"-l", "info",
@@ -73,13 +66,11 @@ func TestParseFlagsWithEnvironmentVariablesAndFlags(t *testing.T) {
 	opts := parseFlags()
 	// Переменные окружения имеют приоритет
 	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, "/newupdate", opts.ServerUpdateEndpoint)
 	assert.Equal(t, 5, opts.PollInterval)
 	assert.Equal(t, 15, opts.ReportInterval)
 	assert.Equal(t, "debug", opts.LogLevel)
 
 	os.Unsetenv(envAddress)
-	os.Unsetenv(envUpdateEndpoint)
 	os.Unsetenv(envPollInterval)
 	os.Unsetenv(envReportInterval)
 	os.Unsetenv(envLogLevel)

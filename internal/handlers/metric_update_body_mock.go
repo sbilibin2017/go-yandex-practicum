@@ -35,16 +35,17 @@ func (m *MockMetricUpdateBodyService) EXPECT() *MockMetricUpdateBodyServiceMockR
 	return m.recorder
 }
 
-// Update mocks base method.
-func (m *MockMetricUpdateBodyService) Update(ctx context.Context, metric types.Metrics) error {
+// Updates mocks base method.
+func (m *MockMetricUpdateBodyService) Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, metric)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret := m.ctrl.Call(m, "Updates", ctx, metrics)
+	ret0, _ := ret[0].([]types.Metrics)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
-// Update indicates an expected call of Update.
-func (mr *MockMetricUpdateBodyServiceMockRecorder) Update(ctx, metric interface{}) *gomock.Call {
+// Updates indicates an expected call of Updates.
+func (mr *MockMetricUpdateBodyServiceMockRecorder) Updates(ctx, metrics interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockMetricUpdateBodyService)(nil).Update), ctx, metric)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Updates", reflect.TypeOf((*MockMetricUpdateBodyService)(nil).Updates), ctx, metrics)
 }

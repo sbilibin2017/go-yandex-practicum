@@ -10,11 +10,10 @@ import (
 
 func TestRun(t *testing.T) {
 	opts := &options{
-		LogLevel:             "info",
-		PollInterval:         1,
-		ReportInterval:       5,
-		ServerAddress:        "http://example.com",
-		ServerUpdateEndpoint: "/update",
+		LogLevel:       "info",
+		PollInterval:   1,
+		ReportInterval: 5,
+		ServerAddress:  "http://example.com",
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
