@@ -12,7 +12,7 @@ import (
 )
 
 type MetricFacade interface {
-	Update(ctx context.Context, metric types.Metrics) error
+	Updates(ctx context.Context, metrics []types.Metrics) error
 }
 
 func StartMetricAgentWorker(
@@ -43,14 +43,20 @@ func consumeMetrics(
 	handler MetricFacade,
 	ch chan types.Metrics,
 ) {
+	var batch []types.Metrics
 	for {
 		select {
 		case m := <-ch:
-			err := handler.Update(ctx, m)
-			if err != nil {
-				logger.Log.Error("Error updating metric", zap.String("id", m.ID), zap.Error(err))
-			}
+			batch = append(batch, m)
 		default:
+			if len(batch) > 0 {
+				err := handler.Updates(ctx, batch)
+				if err != nil {
+					for _, metric := range batch {
+						logger.Log.Error("Error updating metric batch", zap.String("id", metric.ID), zap.Error(err))
+					}
+				}
+			}
 			return
 		}
 	}

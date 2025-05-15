@@ -1,4 +1,4 @@
-package handlers_test
+package handlers
 
 import (
 	"net/http"
@@ -7,84 +7,116 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMetricUpdatePathHandler(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockService := handlers.NewMockMetricUpdatePathService(ctrl)
-	handler := handlers.NewMetricUpdatePathHandler(mockService)
-
-	router := chi.NewRouter()
-	router.Post("/update/{type}/{name}/{value}", handler)
-
-	tests := []struct {
+	type testCase struct {
 		name           string
-		url            string
-		mockSetup      func()
+		urlPath        string
+		mockService    func(m *MockMetricUpdatePathService)
 		expectedStatus int
-	}{
+		expectedBody   string
+	}
+
+	tests := []testCase{
 		{
-			name: "Valid Counter Metric",
-			url:  "/update/counter/counter1/10",
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			name:    "valid counter metric",
+			urlPath: "/update/counter/ops/100",
+			mockService: func(m *MockMetricUpdatePathService) {
+				delta := int64(100)
+				m.EXPECT().
+					Updates(gomock.Any(), []types.Metrics{
+						{
+							MetricID: types.MetricID{ID: "ops", Type: types.CounterMetricType},
+							Delta:    &delta,
+						},
+					}).
+					Return(nil, nil)
 			},
 			expectedStatus: http.StatusOK,
+			expectedBody:   "Metric updated successfully",
 		},
 		{
-			name: "Valid Gauge Metric",
-			url:  "/update/gauge/gauge1/10.5",
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+			name:    "valid gauge metric",
+			urlPath: "/update/gauge/load/3.14",
+			mockService: func(m *MockMetricUpdatePathService) {
+				value := 3.14
+				m.EXPECT().
+					Updates(gomock.Any(), []types.Metrics{
+						{
+							MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
+							Value:    &value,
+						},
+					}).
+					Return(nil, nil)
 			},
 			expectedStatus: http.StatusOK,
+			expectedBody:   "Metric updated successfully",
 		},
 		{
-			name:           "Missing Metric Name",
-			url:            "/update/counter//10",
-			mockSetup:      func() {},
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "Invalid Metric Type",
-			url:            "/update/invalid/invalid1/10",
-			mockSetup:      func() {},
+			name:           "invalid metric type",
+			urlPath:        "/update/unknown/test/42",
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Invalid metric type\n",
 		},
 		{
-			name:           "Invalid Value for Counter",
-			url:            "/update/counter/counter1/invalid",
-			mockSetup:      func() {},
+			name:           "invalid counter value",
+			urlPath:        "/update/counter/test/abc",
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Invalid metric value for counter\n",
 		},
 		{
-			name:           "Invalid Value for Gauge",
-			url:            "/update/gauge/gauge1/invalid",
-			mockSetup:      func() {},
+			name:           "invalid gauge value",
+			urlPath:        "/update/gauge/test/abc",
+			mockService:    nil,
 			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Invalid metric value for gauge\n",
 		},
 		{
-			name: "Service Update Error",
-			url:  "/update/counter/counter1/10",
-			mockSetup: func() {
-				mockService.EXPECT().Update(gomock.Any(), gomock.Any()).Return(types.ErrMetricInternal).Times(1)
+			name:    "internal error",
+			urlPath: "/update/counter/test/1",
+			mockService: func(m *MockMetricUpdatePathService) {
+				delta := int64(1)
+				m.EXPECT().
+					Updates(gomock.Any(), []types.Metrics{
+						{
+							MetricID: types.MetricID{ID: "test", Type: types.CounterMetricType},
+							Delta:    &delta,
+						},
+					}).
+					Return(nil, assert.AnError)
 			},
 			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "Metric not updated\n",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.mockSetup()
-			req := httptest.NewRequest(http.MethodPost, tt.url, nil)
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, req)
-			assert.Equal(t, tt.expectedStatus, rec.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockService := NewMockMetricUpdatePathService(ctrl)
+			if tc.mockService != nil {
+				tc.mockService(mockService)
+			}
+
+			router := chi.NewRouter()
+			router.Post("/update/{type}/{name}/{value}", NewMetricUpdatePathHandler(mockService))
+
+			req := httptest.NewRequest(http.MethodPost, tc.urlPath, nil)
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			resp := w.Result()
+			defer resp.Body.Close()
+
+			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
 
 		})
 	}

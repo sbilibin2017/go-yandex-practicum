@@ -9,7 +9,7 @@ import (
 )
 
 type MetricUpdateBodyService interface {
-	Update(ctx context.Context, metric types.Metrics) error
+	Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error)
 }
 
 func NewMetricUpdateBodyHandler(
@@ -45,7 +45,8 @@ func NewMetricUpdateBodyHandler(
 			return
 		}
 
-		if err := svc.Update(r.Context(), req); err != nil {
+		metricsUpdated, err := svc.Updates(r.Context(), []types.Metrics{req})
+		if err != nil {
 			http.Error(w, "Metric not updated", http.StatusInternalServerError)
 			return
 		}
@@ -53,7 +54,7 @@ func NewMetricUpdateBodyHandler(
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		if err := json.NewEncoder(w).Encode(req); err != nil {
+		if err := json.NewEncoder(w).Encode(metricsUpdated[0]); err != nil {
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 	}

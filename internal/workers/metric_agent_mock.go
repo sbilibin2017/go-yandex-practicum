@@ -35,16 +35,16 @@ func (m *MockMetricFacade) EXPECT() *MockMetricFacadeMockRecorder {
 	return m.recorder
 }
 
-// Update mocks base method.
-func (m *MockMetricFacade) Update(ctx context.Context, metric types.Metrics) error {
+// Updates mocks base method.
+func (m *MockMetricFacade) Updates(ctx context.Context, metrics []types.Metrics) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Update", ctx, metric)
+	ret := m.ctrl.Call(m, "Updates", ctx, metrics)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// Update indicates an expected call of Update.
-func (mr *MockMetricFacadeMockRecorder) Update(ctx, metric interface{}) *gomock.Call {
+// Updates indicates an expected call of Updates.
+func (mr *MockMetricFacadeMockRecorder) Updates(ctx, metrics interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockMetricFacade)(nil).Update), ctx, metric)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Updates", reflect.TypeOf((*MockMetricFacade)(nil).Updates), ctx, metrics)
 }
