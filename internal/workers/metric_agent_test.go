@@ -2,11 +2,15 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/jackc/pgconn"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
@@ -67,4 +71,56 @@ func TestStartMetricAgentWorker(t *testing.T) {
 	cancel()
 	<-done
 	assert.Greater(t, len(ch), 0, "Expected some metrics produced during polling")
+}
+
+func TestWithRetries_SuccessFirstTry(t *testing.T) {
+	ctx := context.Background()
+	calls := 0
+	err := withRetries(ctx, func(ctx context.Context) error {
+		calls++
+		return nil
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, calls)
+}
+
+func TestWithRetries_NonRetriableError(t *testing.T) {
+	ctx := context.Background()
+	calls := 0
+	err := withRetries(ctx, func(ctx context.Context) error {
+		calls++
+		return errors.New("fatal error")
+	})
+
+	assert.EqualError(t, err, "fatal error")
+	assert.Equal(t, 1, calls)
+}
+
+func TestWithRetries_RetriablePgError(t *testing.T) {
+	ctx := context.Background()
+	calls := 0
+	err := withRetries(ctx, func(ctx context.Context) error {
+		calls++
+		return &pgconn.PgError{Code: "08006"}
+	})
+
+	assert.Error(t, err)
+	assert.Equal(t, 4, calls)
+}
+
+func TestWithRetries_RetriableFileError(t *testing.T) {
+	ctx := context.Background()
+	calls := 0
+	err := withRetries(ctx, func(ctx context.Context) error {
+		calls++
+		return &os.PathError{
+			Op:   "open",
+			Path: "/fake/path",
+			Err:  syscall.EAGAIN,
+		}
+	})
+
+	assert.Error(t, err)
+	assert.Equal(t, 4, calls)
 }
