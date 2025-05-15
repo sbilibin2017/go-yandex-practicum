@@ -11,11 +11,13 @@ const (
 	flagPollInterval   = "p"
 	flagReportInterval = "r"
 	flagLogLevel       = "l"
+	flagKey            = "k"
 
 	envAddress        = "ADDRESS"
 	envPollInterval   = "POLL_INTERVAL"
 	envReportInterval = "REPORT_INTERVAL"
 	envLogLevel       = "LOG_LEVEL"
+	envKey            = "KEY"
 
 	defaultServerAddress  = "http://localhost:8080"
 	defaultPollInterval   = 2
@@ -26,6 +28,7 @@ const (
 	flagPollIntervalUsage   = "Poll interval in seconds"
 	flagReportIntervalUsage = "Report interval in seconds"
 	flagLogLevelUsage       = "Log level (e.g., debug, info, warn, error)"
+	flagKeyUsage            = "Key for HMAC SHA256 hash"
 )
 
 type options struct {
@@ -33,6 +36,7 @@ type options struct {
 	PollInterval   int
 	ReportInterval int
 	LogLevel       string
+	Key            string
 }
 
 var opts options
@@ -42,6 +46,7 @@ func parseFlags() *options {
 	flag.IntVar(&opts.PollInterval, flagPollInterval, defaultPollInterval, flagPollIntervalUsage)
 	flag.IntVar(&opts.ReportInterval, flagReportInterval, defaultReportInterval, flagReportIntervalUsage)
 	flag.StringVar(&opts.LogLevel, flagLogLevel, defaultLogLevel, flagLogLevelUsage)
+	flag.StringVar(&opts.Key, flagKey, "", flagKeyUsage)
 
 	flag.Parse()
 
@@ -60,6 +65,9 @@ func parseFlags() *options {
 	}
 	if envLogLevel := os.Getenv(envLogLevel); envLogLevel != "" {
 		opts.LogLevel = envLogLevel
+	}
+	if envKey := os.Getenv(envKey); envKey != "" {
+		opts.Key = envKey
 	}
 
 	return &opts

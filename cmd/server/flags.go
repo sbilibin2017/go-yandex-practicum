@@ -12,6 +12,7 @@ const (
 	flagStoreInterval   = "i"
 	flagFileStoragePath = "f"
 	flagRestore         = "r"
+	flagKey             = "k"
 	flagLogLevel        = "l"
 
 	envServerAddress   = "ADDRESS"
@@ -19,6 +20,7 @@ const (
 	envStoreInterval   = "STORE_INTERVAL"
 	envFileStoragePath = "FILE_STORAGE_PATH"
 	envRestore         = "RESTORE"
+	envKey             = "KEY"
 	envLogLevel        = "LOG_LEVEL"
 
 	defaultServerAddress   = ":8080"
@@ -27,6 +29,7 @@ const (
 	defaultStoreInterval   = 300
 	defaultFileStoragePath = ""
 	defaultRestore         = false
+	defaultKey             = ""
 
 	flagServerAddressUsage   = "address and port to run server"
 	flagDatabaseDSNUse       = "DSN (Data Source Name) for database connection"
@@ -34,6 +37,7 @@ const (
 	flagFileStoragePathUsage = "path to store files"
 	flagRestoreUsage         = "whether to restore data from backup"
 	flagLogLevelUsage        = "logging level (e.g., info, debug, error)"
+	flagKeyUsage             = "key used for SHA256 hashing"
 )
 
 type options struct {
@@ -43,6 +47,7 @@ type options struct {
 	FileStoragePath string
 	Restore         bool
 	DatabaseDSN     string
+	Key             string
 }
 
 var opts options
@@ -54,6 +59,7 @@ func parseFlags() *options {
 	flag.StringVar(&opts.FileStoragePath, flagFileStoragePath, defaultFileStoragePath, flagFileStoragePathUsage)
 	flag.BoolVar(&opts.Restore, flagRestore, defaultRestore, flagRestoreUsage)
 	flag.StringVar(&opts.LogLevel, flagLogLevel, defaultLogLevel, flagLogLevelUsage)
+	flag.StringVar(&opts.Key, flagKey, defaultKey, flagKeyUsage) // добавлен флаг -k
 
 	flag.Parse()
 
@@ -78,6 +84,9 @@ func parseFlags() *options {
 	}
 	if val := os.Getenv(envLogLevel); val != "" {
 		opts.LogLevel = val
+	}
+	if val := os.Getenv(envKey); val != "" {
+		opts.Key = val
 	}
 
 	return &opts

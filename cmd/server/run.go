@@ -120,12 +120,15 @@ func run(ctx context.Context, opts *options) error {
 	metricListAllService := services.NewMetricListAllService(metricListAllContextRepository)
 
 	router := chi.NewRouter()
+
 	router.Use(
 		middlewares.LoggingMiddleware,
+		middlewares.HashMiddleware(opts.Key),
 		middlewares.GzipMiddleware,
 		middlewares.TxMiddleware(db),
 		middlewares.DBRetryMiddleware,
 	)
+
 	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
 	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdatesService))
 	router.Post("/updates/", handlers.NewMetricUpdatesBodyHandler(metricUpdatesService))
