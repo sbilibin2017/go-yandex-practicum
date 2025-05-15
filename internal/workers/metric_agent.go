@@ -2,10 +2,17 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"runtime"
+	"strings"
 	"time"
 
+	"net"
+	"os"
+	"syscall"
+
+	"github.com/jackc/pgconn"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"go.uber.org/zap"
@@ -50,7 +57,9 @@ func consumeMetrics(
 			batch = append(batch, m)
 		default:
 			if len(batch) > 0 {
-				err := handler.Updates(ctx, batch)
+				err := withRetries(ctx, func(ctx context.Context) error {
+					return handler.Updates(ctx, batch)
+				})
 				if err != nil {
 					for _, metric := range batch {
 						logger.Log.Error("Error updating metric batch", zap.String("id", metric.ID), zap.Error(err))
@@ -60,6 +69,67 @@ func consumeMetrics(
 			return
 		}
 	}
+}
+
+func withRetries(ctx context.Context, op func(ctx context.Context) error) error {
+	delays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+	var err error
+
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err = op(ctx)
+		if err == nil || !isRetriableError(err) {
+			return err
+		}
+
+		if attempt < len(delays) {
+			logger.Log.Warn("Retryable error, will retry",
+				zap.Int("attempt", attempt+1),
+				zap.Duration("next_delay", delays[attempt]),
+				zap.Error(err),
+			)
+			select {
+			case <-time.After(delays[attempt]):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+
+	logger.Log.Error("All retry attempts failed", zap.Error(err))
+	return err
+}
+
+func isRetriableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if strings.HasPrefix(pgErr.Code, "08") {
+			return true
+		}
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return true
+		}
+	}
+
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		errno, ok := pathErr.Err.(syscall.Errno)
+		if ok {
+			switch errno {
+			case syscall.EACCES, syscall.EAGAIN, syscall.ETXTBSY, syscall.ETIMEDOUT, syscall.ECONNRESET:
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func produceGaugeMetrics(ch chan types.Metrics) {

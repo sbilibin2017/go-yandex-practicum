@@ -124,6 +124,7 @@ func run(ctx context.Context, opts *options) error {
 		middlewares.LoggingMiddleware,
 		middlewares.GzipMiddleware,
 		middlewares.TxMiddleware(db),
+		middlewares.DBRetryMiddleware,
 	)
 	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
 	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdatesService))
