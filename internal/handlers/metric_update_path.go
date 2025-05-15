@@ -9,7 +9,7 @@ import (
 )
 
 type MetricUpdatePathService interface {
-	Update(ctx context.Context, metrics []types.Metrics) error
+	Update(ctx context.Context, metrics types.Metrics) error
 }
 
 func NewMetricUpdatePathHandler(
@@ -57,7 +57,7 @@ func NewMetricUpdatePathHandler(
 			return
 		}
 
-		if err := svc.Update(r.Context(), []types.Metrics{metric}); err != nil {
+		if err := svc.Update(r.Context(), metric); err != nil {
 			http.Error(w, "Metric not updated", http.StatusInternalServerError)
 			return
 		}

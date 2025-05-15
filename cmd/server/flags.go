@@ -6,45 +6,79 @@ import (
 	"strconv"
 )
 
-var (
-	flagServerAddress   string
-	flagLogLevel        string
-	flagStoreInterval   int
-	flagFileStoragePath string
-	flagRestore         bool
-	flagDatabaseDSN     string
+const (
+	flagServerAddress   = "a"
+	flagDatabaseDSN     = "d"
+	flagStoreInterval   = "i"
+	flagFileStoragePath = "f"
+	flagRestore         = "r"
+	flagLogLevel        = "l"
+
+	envServerAddress   = "ADDRESS"
+	envDatabaseDSN     = "DATABASE_DSN"
+	envStoreInterval   = "STORE_INTERVAL"
+	envFileStoragePath = "FILE_STORAGE_PATH"
+	envRestore         = "RESTORE"
+	envLogLevel        = "LOG_LEVEL"
+
+	defaultServerAddress   = ":8080"
+	defaultDatabaseDSN     = ""
+	defaultLogLevel        = "info"
+	defaultStoreInterval   = 300
+	defaultFileStoragePath = ""
+	defaultRestore         = false
+
+	flagServerAddressUsage   = "address and port to run server"
+	flagDatabaseDSNUse       = "DSN (Data Source Name) for database connection"
+	flagStoreIntervalUsage   = "interval (in seconds) to store data"
+	flagFileStoragePathUsage = "path to store files"
+	flagRestoreUsage         = "whether to restore data from backup"
+	flagLogLevelUsage        = "logging level (e.g., info, debug, error)"
 )
 
-func parseFlags() {
-	flag.StringVar(&flagServerAddress, "a", ":8080", "Address and port to run server")
-	flag.StringVar(&flagLogLevel, "l", "info", "Log level (e.g., debug, info, warn, error)")
-	flag.IntVar(&flagStoreInterval, "i", 300, "Interval (in seconds) to save server state to disk (default 300, 0 for synchronous)")
-	flag.StringVar(&flagFileStoragePath, "f", "", "File path to save the server state (default empty, specify the file path using this flag)")
-	flag.BoolVar(&flagRestore, "r", false, "Whether to restore server state from file (true/false)")
-	flag.StringVar(&flagDatabaseDSN, "d", "", "PostgreSQL DSN (e.g., postgres://user:pass@localhost:5432/dbname)") // Новый флаг
+type options struct {
+	ServerAddress   string
+	LogLevel        string
+	StoreInterval   int
+	FileStoragePath string
+	Restore         bool
+	DatabaseDSN     string
+}
+
+var opts options
+
+func parseFlags() *options {
+	flag.StringVar(&opts.ServerAddress, flagServerAddress, defaultServerAddress, flagServerAddressUsage)
+	flag.StringVar(&opts.DatabaseDSN, flagDatabaseDSN, defaultDatabaseDSN, flagDatabaseDSNUse)
+	flag.IntVar(&opts.StoreInterval, flagStoreInterval, defaultStoreInterval, flagStoreIntervalUsage)
+	flag.StringVar(&opts.FileStoragePath, flagFileStoragePath, defaultFileStoragePath, flagFileStoragePathUsage)
+	flag.BoolVar(&opts.Restore, flagRestore, defaultRestore, flagRestoreUsage)
+	flag.StringVar(&opts.LogLevel, flagLogLevel, defaultLogLevel, flagLogLevelUsage)
 
 	flag.Parse()
 
-	if envServerAddress := os.Getenv("ADDRESS"); envServerAddress != "" {
-		flagServerAddress = envServerAddress
+	if val := os.Getenv(envServerAddress); val != "" {
+		opts.ServerAddress = val
 	}
-	if envLogLevel := os.Getenv("LOG_LEVEL"); envLogLevel != "" {
-		flagLogLevel = envLogLevel
+	if val := os.Getenv(envDatabaseDSN); val != "" {
+		opts.DatabaseDSN = val
 	}
-	if envStoreInterval := os.Getenv("STORE_INTERVAL"); envStoreInterval != "" {
-		if interval, err := strconv.Atoi(envStoreInterval); err == nil {
-			flagStoreInterval = interval
+	if val := os.Getenv(envStoreInterval); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			opts.StoreInterval = v
 		}
 	}
-	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
-		flagFileStoragePath = envFileStoragePath
+	if val := os.Getenv(envFileStoragePath); val != "" {
+		opts.FileStoragePath = val
 	}
-	if envRestore := os.Getenv("RESTORE"); envRestore != "" {
-		if restore, err := strconv.ParseBool(envRestore); err == nil {
-			flagRestore = restore
+	if val := os.Getenv(envRestore); val != "" {
+		if v, err := strconv.ParseBool(val); err == nil {
+			opts.Restore = v
 		}
 	}
-	if envDatabaseDSN := os.Getenv("DATABASE_DSN"); envDatabaseDSN != "" && flagDatabaseDSN == "" {
-		flagDatabaseDSN = envDatabaseDSN
+	if val := os.Getenv(envLogLevel); val != "" {
+		opts.LogLevel = val
 	}
+
+	return &opts
 }

@@ -15,14 +15,14 @@ const (
 )
 
 type MetricID struct {
-	ID   string     `json:"id"`
-	Type MetricType `json:"type"`
+	ID   string     `json:"id" db:"id"`
+	Type MetricType `json:"type" db:"type"`
 }
 
 type Metrics struct {
 	MetricID
-	Value *float64 `json:"value,omitempty"`
-	Delta *int64   `json:"delta,omitempty"`
+	Value *float64 `json:"value,omitempty" db:"value"`
+	Delta *int64   `json:"delta,omitempty" db:"delta"`
 }
 
 var (

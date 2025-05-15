@@ -9,7 +9,7 @@ import (
 )
 
 type MetricUpdateBodyService interface {
-	Update(ctx context.Context, metrics []types.Metrics) error
+	Update(ctx context.Context, metric types.Metrics) error
 }
 
 func NewMetricUpdateBodyHandler(
@@ -45,7 +45,7 @@ func NewMetricUpdateBodyHandler(
 			return
 		}
 
-		if err := svc.Update(r.Context(), []types.Metrics{req}); err != nil {
+		if err := svc.Update(r.Context(), req); err != nil {
 			http.Error(w, "Metric not updated", http.StatusInternalServerError)
 			return
 		}
