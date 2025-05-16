@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type Result struct {
+type result struct {
 	data types.Metrics
 	err  error
 }
@@ -42,9 +42,9 @@ func NewMetricAgentWorker(
 	facade MetricFacade,
 	sem Semaphore,
 	pollInterval int,
+	reportInterval int,
 	workerCount int,
 	batchSize int,
-	reportInterval int,
 ) *MetricAgentWorker {
 	return &MetricAgentWorker{
 		facade:         facade,
@@ -81,7 +81,7 @@ func startMetricAgent(
 	gopsutilMetricsCh := generatorGopsutilMetrics(ctx, pollInterval)
 	mergedMetricsCh := fanIn(ctx, runtimeMetricsCh, gopsutilMetricsCh)
 
-	resultCh := make(chan Result, 10*batchSize)
+	resultCh := make(chan result, 10*batchSize)
 	go fanOutWorkerPool(
 		ctx,
 		facade,
@@ -435,7 +435,7 @@ func fanOutWorker(
 	inputCh <-chan types.Metrics,
 	batchSize int,
 	reportInterval int,
-	resultCh chan<- Result,
+	resultCh chan<- result,
 ) {
 	batch := make([]types.Metrics, 0, batchSize)
 	dur := time.Duration(reportInterval) * time.Second
@@ -460,7 +460,7 @@ func fanOutWorker(
 			err := facade.Updates(ctx, batchCopy)
 			if err != nil {
 				for _, m := range batchCopy {
-					resultCh <- Result{
+					resultCh <- result{
 						data: m,
 						err:  err,
 					}
@@ -505,7 +505,7 @@ func fanOutWorkerPool(
 	workerCount int,
 	batchSize int,
 	reportInterval int,
-	resultCh chan<- Result,
+	resultCh chan<- result,
 ) {
 	var wg sync.WaitGroup
 	wg.Add(workerCount)

@@ -31,9 +31,9 @@ func run(ctx context.Context) error {
 		metricFacade,
 		sem,
 		flagPollInterval,
+		flagReportInterval,
 		flagNumWorkers,
 		flagBatchSize,
-		flagReportInterval,
 	)
 
 	runners.RunWorker(ctx, worker)

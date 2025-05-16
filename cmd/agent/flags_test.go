@@ -24,6 +24,7 @@ func TestParseFlags_CommandLineArgs(t *testing.T) {
 		"-k", "mykey",
 		"-l", "50",
 		"-w", "7",
+		"-b", "42", // добавляем batch size
 	}
 
 	os.Clearenv()
@@ -37,6 +38,7 @@ func TestParseFlags_CommandLineArgs(t *testing.T) {
 	assert.Equal(t, "mykey", flagKey)
 	assert.Equal(t, 50, flagRateLimit)
 	assert.Equal(t, 7, flagNumWorkers)
+	assert.Equal(t, 42, flagBatchSize) // проверяем batch size
 }
 
 func TestParseFlags_EnvOverrides(t *testing.T) {
@@ -51,6 +53,7 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	os.Setenv("KEY", "envkey")
 	os.Setenv("RATE_LIMIT", "100")
 	os.Setenv("NUM_WORKERS", "12")
+	os.Setenv("BATCH_SIZE", "33") // добавляем batch size
 
 	parseFlags()
 
@@ -61,6 +64,7 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	assert.Equal(t, "envkey", flagKey)
 	assert.Equal(t, 100, flagRateLimit)
 	assert.Equal(t, 12, flagNumWorkers)
+	assert.Equal(t, 33, flagBatchSize) // проверяем batch size
 }
 
 func TestParseFlags_Defaults(t *testing.T) {
@@ -78,4 +82,5 @@ func TestParseFlags_Defaults(t *testing.T) {
 	assert.Equal(t, "", flagKey)
 	assert.Equal(t, 0, flagRateLimit)
 	assert.Equal(t, 5, flagNumWorkers)
+	assert.Equal(t, 100, flagBatchSize) // добавляем проверку дефолта batch size
 }

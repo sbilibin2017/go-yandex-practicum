@@ -192,7 +192,7 @@ func TestFanOutWorker_BatchSend(t *testing.T) {
 	defer cancel()
 
 	inputCh := make(chan types.Metrics)
-	resultCh := make(chan Result, 10)
+	resultCh := make(chan result, 10)
 
 	metrics := []types.Metrics{
 		{
@@ -211,16 +211,13 @@ func TestFanOutWorker_BatchSend(t *testing.T) {
 
 	go fanOutWorker(ctx, mockFacade, mockSemaphore, inputCh, 2, 1, resultCh)
 
-	// Отправляем метрики
 	inputCh <- metrics[0]
 	inputCh <- metrics[1]
 
-	// Ждём немного, чтобы воркер обработал батч
 	time.Sleep(100 * time.Millisecond)
 	close(inputCh)
 
-	// Проверяем результат ошибок
-	var gotResults []Result
+	var gotResults []result
 	for i := 0; i < 2; i++ {
 		select {
 		case res := <-resultCh:
@@ -247,7 +244,7 @@ func TestFanOutWorkerPool(t *testing.T) {
 	defer cancel()
 
 	inputCh := make(chan types.Metrics)
-	resultCh := make(chan Result, 10)
+	resultCh := make(chan result, 10)
 
 	batchSize := 2
 	reportInterval := 1
@@ -256,11 +253,9 @@ func TestFanOutWorkerPool(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Ожидаем вызовы Acquire -> Updates -> Release в порядке
 	gomock.InOrder(
 		mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil),
 		mockFacade.EXPECT().Updates(gomock.Any(), gomock.Len(batchSize)).Do(func(_ context.Context, _ []types.Metrics) {
-			// Как только Updates вызывается — снимаем ожидание
 			wg.Done()
 		}).Return(nil),
 		mockSemaphore.EXPECT().Release(int64(1)),
@@ -268,21 +263,16 @@ func TestFanOutWorkerPool(t *testing.T) {
 
 	go fanOutWorkerPool(ctx, mockFacade, mockSemaphore, inputCh, workerCount, batchSize, reportInterval, resultCh)
 
-	// Отправляем два метрики, чтобы сработал batch
 	inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType}}
 	inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m2", Type: types.CounterMetricType}}
 
-	// Ждем вызова Updates (то есть успешной обработки batch)
 	wg.Wait()
 
-	// Закрываем inputCh, чтобы воркер завершился
 	close(inputCh)
 
-	// Читаем все из resultCh, чтобы горутины не блокировались
 	for range resultCh {
 	}
 
-	// Отмена контекста, если надо
 	cancel()
 }
 
@@ -299,11 +289,9 @@ func TestStartMetricAgent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Разрешаем любые вызовы Acquire и Release, чтобы не блокировать поток
 	mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil).AnyTimes()
 	mockSemaphore.EXPECT().Release(int64(1)).AnyTimes()
 
-	// Разрешаем любые вызовы Updates, возвращаем nil, AnyTimes, чтобы не мешать тесту
 	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	errCh := make(chan error, 1)
@@ -313,10 +301,8 @@ func TestStartMetricAgent(t *testing.T) {
 		errCh <- err
 	}()
 
-	// Даём немного времени на запуск и работу
 	time.Sleep(100 * time.Millisecond)
 
-	// Отменяем контекст - должны корректно завершить работу
 	cancel()
 
 	err := <-errCh
@@ -330,20 +316,18 @@ func TestNewMetricAgentWorkerAndStart(t *testing.T) {
 	mockFacade := NewMockMetricFacade(ctrl)
 	mockSemaphore := NewMockSemaphore(ctrl)
 
-	// Разрешаем любые вызовы Acquire и Release для корректной работы воркера
 	mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil).AnyTimes()
 	mockSemaphore.EXPECT().Release(int64(1)).AnyTimes()
 
-	// Разрешаем любые вызовы Updates, возвращаем nil
 	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	worker := NewMetricAgentWorker(
 		mockFacade,
 		mockSemaphore,
-		1, // pollInterval
-		2, // workerCount
-		2, // batchSize
-		1, // reportInterval
+		1,
+		1,
+		2,
+		2,
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -354,9 +338,9 @@ func TestNewMetricAgentWorkerAndStart(t *testing.T) {
 		errCh <- err
 	}()
 
-	time.Sleep(100 * time.Millisecond) // Дать немного времени на работу
+	time.Sleep(100 * time.Millisecond)
 
-	cancel() // Отменяем контекст, чтобы остановить работу
+	cancel()
 
 	err := <-errCh
 	require.ErrorIs(t, err, context.Canceled)

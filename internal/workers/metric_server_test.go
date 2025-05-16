@@ -14,7 +14,6 @@ import (
 func TestMetricServerWorker_SyncStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
@@ -44,7 +43,6 @@ func TestMetricServerWorker_SyncStore(t *testing.T) {
 func TestMetricServerWorker_AsyncStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
@@ -74,7 +72,6 @@ func TestMetricServerWorker_AsyncStore(t *testing.T) {
 func TestMetricServerWorker_RestoreEnabled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
@@ -89,7 +86,6 @@ func TestMetricServerWorker_RestoreEnabled(t *testing.T) {
 
 	fileListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).Times(1)
 	memorySaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).Times(1)
-
 	memoryListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).Times(1)
 	fileSaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).Times(1)
 
@@ -104,14 +100,11 @@ func TestMetricServerWorker_RestoreEnabled(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// Helper function to create float pointers
 func floatPtr(f float64) *float64 { return &f }
 
-// Test for saveMetricsToFile
 func TestSaveMetricsToFile(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	mockMemoryRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	mockFileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
@@ -126,23 +119,18 @@ func TestSaveMetricsToFile(t *testing.T) {
 		},
 	}
 
-	// Mock ListAll and Save
 	mockMemoryRepo.EXPECT().ListAll(gomock.Any()).Return(metrics, nil)
 	mockFileSaveRepo.EXPECT().Save(gomock.Any(), metrics[0]).Return(nil).Times(1)
 	mockFileSaveRepo.EXPECT().Save(gomock.Any(), metrics[1]).Return(nil).Times(1)
 
-	// Call the function under test
 	err := saveMetricsToFile(context.Background(), mockMemoryRepo, mockFileSaveRepo)
 
-	// Check results
 	require.NoError(t, err)
 }
 
-// Test for saveMetricsToFile with error during Save
 func TestSaveMetricsToFile_ErrorSavingMetric(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	mockMemoryRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	mockFileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
@@ -153,23 +141,18 @@ func TestSaveMetricsToFile_ErrorSavingMetric(t *testing.T) {
 		},
 	}
 
-	// Mock ListAll and Save
 	mockMemoryRepo.EXPECT().ListAll(gomock.Any()).Return(metrics, nil)
 	mockFileSaveRepo.EXPECT().Save(gomock.Any(), metrics[0]).Return(assert.AnError)
 
-	// Call the function under test
 	err := saveMetricsToFile(context.Background(), mockMemoryRepo, mockFileSaveRepo)
 
-	// Check that error was returned
 	require.Error(t, err)
 	assert.Equal(t, err, assert.AnError)
 }
 
-// Test for loadMetricsFromFile
 func TestLoadMetricsFromFile(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	mockFileListRepo := NewMockMetricListAllFileRepository(ctrl)
 	mockMemorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 
@@ -184,23 +167,18 @@ func TestLoadMetricsFromFile(t *testing.T) {
 		},
 	}
 
-	// Mock ListAll and Save
 	mockFileListRepo.EXPECT().ListAll(gomock.Any()).Return(metrics, nil)
 	mockMemorySaveRepo.EXPECT().Save(gomock.Any(), metrics[0]).Return(nil).Times(1)
 	mockMemorySaveRepo.EXPECT().Save(gomock.Any(), metrics[1]).Return(nil).Times(1)
 
-	// Call the function under test
 	err := loadMetricsFromFile(context.Background(), mockFileListRepo, mockMemorySaveRepo)
 
-	// Check results
 	require.NoError(t, err)
 }
 
-// Test for loadMetricsFromFile with error during Save to memory
 func TestLoadMetricsFromFile_ErrorSavingMetricToMemory(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	mockFileListRepo := NewMockMetricListAllFileRepository(ctrl)
 	mockMemorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 
@@ -211,14 +189,11 @@ func TestLoadMetricsFromFile_ErrorSavingMetricToMemory(t *testing.T) {
 		},
 	}
 
-	// Mock ListAll and Save
 	mockFileListRepo.EXPECT().ListAll(gomock.Any()).Return(metrics, nil)
 	mockMemorySaveRepo.EXPECT().Save(gomock.Any(), metrics[0]).Return(assert.AnError)
 
-	// Call the function under test
 	err := loadMetricsFromFile(context.Background(), mockFileListRepo, mockMemorySaveRepo)
 
-	// Check that error was returned
 	require.Error(t, err)
 	assert.Equal(t, err, assert.AnError)
 }
