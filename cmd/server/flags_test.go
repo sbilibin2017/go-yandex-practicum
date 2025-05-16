@@ -9,87 +9,74 @@ import (
 )
 
 func resetFlags() {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 }
 
-func clearEnvVars() {
-	os.Unsetenv(envServerAddress)
-	os.Unsetenv(envLogLevel)
-	os.Unsetenv(envStoreInterval)
-	os.Unsetenv(envFileStoragePath)
-	os.Unsetenv(envRestore)
-	os.Unsetenv(envDatabaseDSN)
-}
+func TestParseFlags_CommandLineArgs(t *testing.T) {
 
-func TestParseFlagsWithFlags(t *testing.T) {
 	resetFlags()
-	clearEnvVars()
+
 	os.Args = []string{
-		"test",
-		"-d", "postgres://localhost/db",
-		"-a", ":9090",
+		"cmd",
+		"-a", "127.0.0.1:9000",
+		"-d", "user:pass@/dbname",
+		"-i", "123",
+		"-f", "/tmp/files",
+		"-r",
+		"-k", "mykey",
 		"-l", "debug",
-		"-i", "600",
-		"-f", "/tmp/teststorage",
-		"-r", "true",
-	}
-	result := parseFlags()
-	assert.Equal(t, ":9090", result.ServerAddress)
-	assert.Equal(t, "postgres://localhost/db", result.DatabaseDSN)
-	assert.Equal(t, "debug", result.LogLevel)
-	assert.Equal(t, 600, result.StoreInterval)
-	assert.Equal(t, "/tmp/teststorage", result.FileStoragePath)
-	assert.True(t, result.Restore)
-}
-
-func TestParseFlagsWithEnvironmentVariables(t *testing.T) {
-	resetFlags()
-	clearEnvVars()
-	os.Setenv(envServerAddress, ":9090")
-	os.Setenv(envLogLevel, "debug")
-	os.Setenv(envStoreInterval, "600")
-	os.Setenv(envFileStoragePath, "/tmp/teststorage")
-	os.Setenv(envRestore, "true")
-	os.Setenv(envDatabaseDSN, "postgres://localhost/db")
-	os.Args = []string{"test"}
-
-	result := parseFlags()
-	assert.Equal(t, ":9090", result.ServerAddress)
-	assert.Equal(t, "debug", result.LogLevel)
-	assert.Equal(t, 600, result.StoreInterval)
-	assert.Equal(t, "/tmp/teststorage", result.FileStoragePath)
-	assert.True(t, result.Restore)
-	assert.Equal(t, "postgres://localhost/db", result.DatabaseDSN)
-
-	clearEnvVars()
-}
-
-func TestParseFlagsWithEnvironmentVariablesAndFlags(t *testing.T) {
-	resetFlags()
-	clearEnvVars()
-	os.Setenv(envServerAddress, ":9090")
-	os.Setenv(envLogLevel, "debug")
-	os.Setenv(envStoreInterval, "600")
-	os.Setenv(envFileStoragePath, "/tmp/teststorage")
-	os.Setenv(envRestore, "true")
-	os.Setenv(envDatabaseDSN, "postgres://localhost/db")
-	os.Args = []string{
-		"test",
-		"-a", ":8080",
-		"-l", "info",
-		"-i", "300",
-		"-f", "/tmp/storage",
-		"-r", "false",
-		"-d", "postgres://localhost/newdb",
 	}
 
-	result := parseFlags()
-	assert.Equal(t, ":9090", result.ServerAddress)
-	assert.Equal(t, "debug", result.LogLevel)
-	assert.Equal(t, 600, result.StoreInterval)
-	assert.Equal(t, "/tmp/teststorage", result.FileStoragePath)
-	assert.True(t, result.Restore)
-	assert.Equal(t, "postgres://localhost/db", result.DatabaseDSN)
+	os.Clearenv()
 
-	clearEnvVars()
+	parseFlags()
+
+	assert.Equal(t, "127.0.0.1:9000", flagServerAddress)
+	assert.Equal(t, "user:pass@/dbname", flagDatabaseDSN)
+	assert.Equal(t, 123, flagStoreInterval)
+	assert.Equal(t, "/tmp/files", flagFileStoragePath)
+	assert.True(t, flagRestore)
+	assert.Equal(t, "mykey", flagKey)
+	assert.Equal(t, "debug", flagLogLevel)
+}
+
+func TestParseFlags_EnvOverrides(t *testing.T) {
+	resetFlags()
+
+	os.Args = []string{"cmd"}
+
+	os.Setenv("ADDRESS", "10.0.0.1:8081")
+	os.Setenv("DATABASE_DSN", "envuser:envpass@/envdb")
+	os.Setenv("STORE_INTERVAL", "456")
+	os.Setenv("FILE_STORAGE_PATH", "/env/files")
+	os.Setenv("RESTORE", "true")
+	os.Setenv("KEY", "envkey")
+	os.Setenv("LOG_LEVEL", "error")
+
+	parseFlags()
+
+	assert.Equal(t, "10.0.0.1:8081", flagServerAddress)
+	assert.Equal(t, "envuser:envpass@/envdb", flagDatabaseDSN)
+	assert.Equal(t, 456, flagStoreInterval)
+	assert.Equal(t, "/env/files", flagFileStoragePath)
+	assert.True(t, flagRestore)
+	assert.Equal(t, "envkey", flagKey)
+	assert.Equal(t, "error", flagLogLevel)
+}
+
+func TestParseFlags_Defaults(t *testing.T) {
+	resetFlags()
+
+	os.Args = []string{"cmd"}
+	os.Clearenv()
+
+	parseFlags()
+
+	assert.Equal(t, ":8080", flagServerAddress)
+	assert.Equal(t, "", flagDatabaseDSN)
+	assert.Equal(t, 300, flagStoreInterval)
+	assert.Equal(t, "", flagFileStoragePath)
+	assert.False(t, flagRestore)
+	assert.Equal(t, "", flagKey)
+	assert.Equal(t, "info", flagLogLevel)
 }

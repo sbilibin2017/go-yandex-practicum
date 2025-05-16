@@ -16,22 +16,22 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/repositories"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/services"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
-func run(ctx context.Context, opts *options) error {
-	if err := logger.Initialize(opts.LogLevel); err != nil {
+func run(ctx context.Context) error {
+	if err := logger.Initialize(flagLogLevel); err != nil {
 		return err
 	}
 
 	var file *os.File
-	if opts.FileStoragePath != "" {
+	if flagFileStoragePath != "" {
 		var err error
-		file, err = os.OpenFile(opts.FileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+		file, err = os.OpenFile(flagFileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
@@ -39,9 +39,9 @@ func run(ctx context.Context, opts *options) error {
 	}
 
 	var db *sqlx.DB
-	if opts.DatabaseDSN != "" {
+	if flagDatabaseDSN != "" {
 		var err error
-		db, err = sqlx.Connect("pgx", opts.DatabaseDSN)
+		db, err = sqlx.Connect("pgx", flagDatabaseDSN)
 		if err != nil {
 			return err
 		}
@@ -57,8 +57,8 @@ func run(ctx context.Context, opts *options) error {
 	}
 
 	var storeTicker *time.Ticker
-	if opts.StoreInterval > 0 {
-		storeTicker = time.NewTicker(time.Duration(opts.StoreInterval) * time.Second)
+	if flagStoreInterval > 0 {
+		storeTicker = time.NewTicker(time.Duration(flagStoreInterval) * time.Second)
 		defer storeTicker.Stop()
 	}
 
@@ -123,7 +123,7 @@ func run(ctx context.Context, opts *options) error {
 
 	router.Use(
 		middlewares.LoggingMiddleware,
-		middlewares.HashMiddleware(opts.Key),
+		middlewares.HashMiddleware(flagKey),
 		middlewares.GzipMiddleware,
 		middlewares.TxMiddleware(db),
 		middlewares.DBRetryMiddleware,
@@ -138,68 +138,36 @@ func run(ctx context.Context, opts *options) error {
 	router.Get("/ping", handlers.NewDBPingHandler(db))
 
 	server := &http.Server{
-		Addr:    opts.ServerAddress,
+		Addr:    flagServerAddress,
 		Handler: router,
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	grp, ctx := errgroup.WithContext(ctx)
-
+	var worker *workers.MetricServerWorker
 	if metricListAllFileRepository != nil && metricSaveFileRepository != nil {
-		grp.Go(func() error {
-			return workers.StartMetricServerWorker(
-				ctx,
-				metricListAllContextRepository,
-				metricSaveContextRepository,
-				metricListAllFileRepository,
-				metricSaveFileRepository,
-				storeTicker,
-				opts.Restore,
-			)
-		})
+		worker = workers.NewMetricServerWorker(
+			metricListAllContextRepository,
+			metricSaveContextRepository,
+			metricListAllFileRepository,
+			metricSaveFileRepository,
+			storeTicker,
+			flagRestore,
+		)
 	}
 
-	grp.Go(func() error {
-		logger.Log.Info("Starting HTTP server", zap.String("addr", server.Addr))
-
-		errCh := make(chan error, 1)
-		go func() {
-			err := server.ListenAndServe()
-			if err != nil && err != http.ErrServerClosed {
-				logger.Log.Error("Server ListenAndServe error", zap.Error(err))
-				errCh <- err
-			} else {
-				logger.Log.Info("Server stopped listening", zap.Error(err))
-			}
-			close(errCh)
-		}()
-
-		select {
-		case <-ctx.Done():
-			logger.Log.Info("Context done, shutting down server")
-
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			if err := server.Shutdown(shutdownCtx); err != nil {
-				logger.Log.Error("Error during server shutdown", zap.Error(err))
-				return err
-			}
-			logger.Log.Info("Server shutdown complete")
-			return nil
-
-		case err := <-errCh:
-			if err != nil {
-				logger.Log.Error("Server error received from errCh", zap.Error(err))
-			} else {
-				logger.Log.Info("Server exited without error")
-			}
+	if worker != nil {
+		err := runners.RunWorker(ctx, worker)
+		if err != nil {
 			return err
 		}
-	})
+	}
 
-	err := grp.Wait()
-	return err
+	err := runners.RunServer(ctx, server)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

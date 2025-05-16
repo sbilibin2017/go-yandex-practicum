@@ -304,8 +304,12 @@ loop:
 func TestHandleResults_LogsOnResult(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	ch := make(chan Result, 2)
-	handleResults(ctx, ch)
+	errCh := make(chan error, 1)
+
+	handleResults(ctx, ch, errCh)
+
 	val := float64(1)
 	ch <- Result{
 		data: types.Metrics{MetricID: types.MetricID{ID: "success", Type: types.GaugeMetricType}, Value: &val},
@@ -316,7 +320,13 @@ func TestHandleResults_LogsOnResult(t *testing.T) {
 		err:  assert.AnError,
 	}
 	close(ch)
-	time.Sleep(10 * time.Millisecond)
+
+	select {
+	case err := <-errCh:
+		require.Equal(t, assert.AnError, err)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ожидалась ошибка, но она не пришла в errCh")
+	}
 }
 
 func TestStartMetricAgentWorker_RunsWithoutPanic(t *testing.T) {
@@ -332,8 +342,11 @@ func TestStartMetricAgentWorker_RunsWithoutPanic(t *testing.T) {
 		Updates(gomock.Any(), gomock.Any()).
 		Return(nil).
 		AnyTimes()
-	go StartMetricAgentWorker(ctx, mockHandler, pollInterval, reportInterval, numWorkers)
+	worker := NewMetricAgentWorker(mockHandler, pollInterval, reportInterval, numWorkers)
+	go worker.Start(ctx)
 	time.Sleep(1500 * time.Millisecond)
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestFanInResults_MergesChannels(t *testing.T) {

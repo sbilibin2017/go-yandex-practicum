@@ -9,101 +9,73 @@ import (
 )
 
 func resetFlags() {
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 }
 
-func TestParseFlagsWithFlags(t *testing.T) {
+func TestParseFlags_CommandLineArgs(t *testing.T) {
 	resetFlags()
+
 	os.Args = []string{
-		"test",
-		"-a", "http://localhost:9090",
-		"-p", "5",
-		"-r", "15",
+		"cmd",
+		"-a", "http://127.0.0.1:9000",
+		"-p", "15",
+		"-r", "30",
 		"-ll", "debug",
-		"-k", "secretkey",
-		"-l", "100",
-		"-w", "20",
+		"-k", "mykey",
+		"-l", "50",
+		"-w", "7",
 	}
 
-	opts := parseFlags()
-	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, 5, opts.PollInterval)
-	assert.Equal(t, 15, opts.ReportInterval)
-	assert.Equal(t, "debug", opts.LogLevel)
-	assert.Equal(t, "secretkey", opts.Key)
-	assert.Equal(t, 100, opts.RateLimit)
-	assert.Equal(t, 20, opts.NumWorkers)
+	os.Clearenv()
+
+	parseFlags()
+
+	assert.Equal(t, "http://127.0.0.1:9000", flagServerAddress)
+	assert.Equal(t, 15, flagPollInterval)
+	assert.Equal(t, 30, flagReportInterval)
+	assert.Equal(t, "debug", flagLogLevel)
+	assert.Equal(t, "mykey", flagKey)
+	assert.Equal(t, 50, flagRateLimit)
+	assert.Equal(t, 7, flagNumWorkers)
 }
 
-func TestParseFlagsWithEnvironmentVariables(t *testing.T) {
+func TestParseFlags_EnvOverrides(t *testing.T) {
 	resetFlags()
 
-	os.Setenv(envAddress, "http://localhost:9090")
-	os.Setenv(envPollInterval, "5")
-	os.Setenv(envReportInterval, "15")
-	os.Setenv(envLogLevel, "debug")
-	os.Setenv(envKey, "envsecret")
-	os.Setenv(envRateLimit, "200")
-	os.Setenv(envNumWorkers, "30")
+	os.Args = []string{"cmd"}
 
-	os.Args = []string{"test"}
+	os.Setenv("ADDRESS", "http://10.0.0.1:8081")
+	os.Setenv("POLL_INTERVAL", "20")
+	os.Setenv("REPORT_INTERVAL", "40")
+	os.Setenv("LOG_LEVEL", "error")
+	os.Setenv("KEY", "envkey")
+	os.Setenv("RATE_LIMIT", "100")
+	os.Setenv("NUM_WORKERS", "12")
 
-	opts := parseFlags()
-	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, 5, opts.PollInterval)
-	assert.Equal(t, 15, opts.ReportInterval)
-	assert.Equal(t, "debug", opts.LogLevel)
-	assert.Equal(t, "envsecret", opts.Key)
-	assert.Equal(t, 200, opts.RateLimit)
-	assert.Equal(t, 30, opts.NumWorkers)
+	parseFlags()
 
-	os.Unsetenv(envAddress)
-	os.Unsetenv(envPollInterval)
-	os.Unsetenv(envReportInterval)
-	os.Unsetenv(envLogLevel)
-	os.Unsetenv(envKey)
-	os.Unsetenv(envRateLimit)
-	os.Unsetenv(envNumWorkers)
+	assert.Equal(t, "http://10.0.0.1:8081", flagServerAddress)
+	assert.Equal(t, 20, flagPollInterval)
+	assert.Equal(t, 40, flagReportInterval)
+	assert.Equal(t, "error", flagLogLevel)
+	assert.Equal(t, "envkey", flagKey)
+	assert.Equal(t, 100, flagRateLimit)
+	assert.Equal(t, 12, flagNumWorkers)
 }
 
-func TestParseFlagsWithEnvironmentVariablesAndFlags(t *testing.T) {
+func TestParseFlags_Defaults(t *testing.T) {
 	resetFlags()
 
-	os.Setenv(envAddress, "http://localhost:9090")
-	os.Setenv(envPollInterval, "5")
-	os.Setenv(envReportInterval, "15")
-	os.Setenv(envLogLevel, "debug")
-	os.Setenv(envKey, "envsecret")
-	os.Setenv(envRateLimit, "300")
-	os.Setenv(envNumWorkers, "40")
+	os.Args = []string{"cmd"}
+	os.Clearenv()
 
-	os.Args = []string{
-		"test",
-		"-a", "http://localhost:8080",
-		"-p", "10",
-		"-r", "20",
-		"-ll", "info",
-		"-k", "flagsecret",
-		"-l", "400",
-		"-w", "50",
-	}
+	parseFlags()
 
-	opts := parseFlags()
-
-	// Значения берутся из переменных окружения, а не из флагов
-	assert.Equal(t, "http://localhost:9090", opts.ServerAddress)
-	assert.Equal(t, 5, opts.PollInterval)
-	assert.Equal(t, 15, opts.ReportInterval)
-	assert.Equal(t, "debug", opts.LogLevel)
-	assert.Equal(t, "envsecret", opts.Key)
-	assert.Equal(t, 300, opts.RateLimit)
-	assert.Equal(t, 40, opts.NumWorkers)
-
-	os.Unsetenv(envAddress)
-	os.Unsetenv(envPollInterval)
-	os.Unsetenv(envReportInterval)
-	os.Unsetenv(envLogLevel)
-	os.Unsetenv(envKey)
-	os.Unsetenv(envRateLimit)
-	os.Unsetenv(envNumWorkers)
+	assert.Equal(t, "http://localhost:8080", flagServerAddress)
+	assert.Equal(t, 2, flagPollInterval)
+	assert.Equal(t, 10, flagReportInterval)
+	assert.Equal(t, "info", flagLogLevel)
+	assert.Equal(t, "", flagKey)
+	assert.Equal(t, 0, flagRateLimit)
+	assert.Equal(t, 5, flagNumWorkers)
 }

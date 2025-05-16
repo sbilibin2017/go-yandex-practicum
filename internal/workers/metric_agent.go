@@ -26,13 +26,31 @@ type MetricFacade interface {
 	Updates(ctx context.Context, metrics []types.Metrics) error
 }
 
-func StartMetricAgentWorker(
-	ctx context.Context,
+type MetricAgentWorker struct {
+	metricFacade   MetricFacade
+	pollInterval   int
+	reportInterval int
+	numWorkers     int
+}
+
+func NewMetricAgentWorker(
 	metricFacade MetricFacade,
-	pollInterval,
-	reportInterval,
+	pollInterval int,
+	reportInterval int,
 	numWorkers int,
-) {
+) *MetricAgentWorker {
+	return &MetricAgentWorker{
+		metricFacade:   metricFacade,
+		pollInterval:   pollInterval,
+		reportInterval: reportInterval,
+		numWorkers:     numWorkers,
+	}
+}
+
+func (w *MetricAgentWorker) Start(ctx context.Context) error {
+	pollInterval := w.pollInterval
+	reportInterval := w.reportInterval
+
 	if pollInterval == 0 {
 		pollInterval = 1
 	}
@@ -54,11 +72,19 @@ func StartMetricAgentWorker(
 
 	metricsCh := metricsFanOut(ctx, runtimeCounterCh, gopsutilCh)
 
-	resultChs := metricsWorkerPool(ctx, metricFacade, metricsCh, reportTicker, numWorkers)
+	resultChs := metricsWorkerPool(ctx, w.metricFacade, metricsCh, reportTicker, w.numWorkers)
 
 	finalResultCh := fanInResults(ctx, resultChs...)
 
-	handleResults(ctx, finalResultCh)
+	errCh := make(chan error, 1)
+	handleResults(ctx, finalResultCh, errCh)
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func generator(ctx context.Context, pollTicker *time.Ticker) <-chan types.Metrics {
@@ -321,7 +347,7 @@ func fanInResults(ctx context.Context, resultChs ...<-chan Result) <-chan Result
 	return finalCh
 }
 
-func handleResults(ctx context.Context, resultCh <-chan Result) {
+func handleResults(ctx context.Context, resultCh <-chan Result, errCh chan<- error) {
 	go func() {
 		for {
 			select {
@@ -336,6 +362,11 @@ func handleResults(ctx context.Context, resultCh <-chan Result) {
 						zap.String("metric", res.data.MetricID.ID),
 						zap.Error(res.err),
 					)
+					// Передаём первую ошибку
+					select {
+					case errCh <- res.err:
+					default:
+					}
 				} else {
 					logger.Log.Info("Метрика успешно отправлена",
 						zap.String("metric", res.data.MetricID.ID),

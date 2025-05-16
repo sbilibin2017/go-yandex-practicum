@@ -6,90 +6,54 @@ import (
 	"strconv"
 )
 
-const (
-	flagAddress        = "a"
-	flagPollInterval   = "p"
-	flagReportInterval = "r"
-	flagLogLevel       = "ll"
-	flagKey            = "k"
-	flagRateLimit      = "l"
-	flagNumWorkers     = "w"
-
-	envAddress        = "ADDRESS"
-	envPollInterval   = "POLL_INTERVAL"
-	envReportInterval = "REPORT_INTERVAL"
-	envLogLevel       = "LOG_LEVEL"
-	envKey            = "KEY"
-	envRateLimit      = "RATE_LIMIT"
-	envNumWorkers     = "NUM_WORKERS"
-
-	defaultServerAddress  = "http://localhost:8080"
-	defaultPollInterval   = 2
-	defaultReportInterval = 10
-	defaultLogLevel       = "info"
-	defaultNumWorkers     = 5
-
-	flagAddressUsage        = "Metrics server address"
-	flagPollIntervalUsage   = "Poll interval in seconds"
-	flagReportIntervalUsage = "Report interval in seconds"
-	flagLogLevelUsage       = "Log level (e.g., debug, info, warn, error)"
-	flagKeyUsage            = "Key for HMAC SHA256 hash"
-	flagRateLimitUsage      = "Max number of concurrent outgoing requests"
-	flagNumWorkersUsage     = "Number of workers"
+var (
+	flagServerAddress  string
+	flagPollInterval   int
+	flagReportInterval int
+	flagLogLevel       string
+	flagKey            string
+	flagRateLimit      int
+	flagNumWorkers     int
 )
 
-type options struct {
-	ServerAddress  string
-	PollInterval   int
-	ReportInterval int
-	LogLevel       string
-	Key            string
-	RateLimit      int
-	NumWorkers     int
-}
-
-var opts options
-
-func parseFlags() *options {
-	flag.StringVar(&opts.ServerAddress, flagAddress, defaultServerAddress, flagAddressUsage)
-	flag.IntVar(&opts.PollInterval, flagPollInterval, defaultPollInterval, flagPollIntervalUsage)
-	flag.IntVar(&opts.ReportInterval, flagReportInterval, defaultReportInterval, flagReportIntervalUsage)
-	flag.StringVar(&opts.LogLevel, flagLogLevel, defaultLogLevel, flagLogLevelUsage)
-	flag.StringVar(&opts.Key, flagKey, "", flagKeyUsage)
-	flag.IntVar(&opts.RateLimit, flagRateLimit, 0, flagRateLimitUsage)
-	flag.IntVar(&opts.NumWorkers, flagNumWorkers, defaultNumWorkers, flagNumWorkersUsage)
+func parseFlags() {
+	flag.StringVar(&flagServerAddress, "a", "http://localhost:8080", "Metrics server address")
+	flag.IntVar(&flagPollInterval, "p", 2, "Poll interval in seconds")
+	flag.IntVar(&flagReportInterval, "r", 10, "Report interval in seconds")
+	flag.StringVar(&flagLogLevel, "ll", "info", "Log level (e.g., debug, info, warn, error)")
+	flag.StringVar(&flagKey, "k", "", "Key for HMAC SHA256 hash")
+	flag.IntVar(&flagRateLimit, "l", 0, "Max number of concurrent outgoing requests")
+	flag.IntVar(&flagNumWorkers, "w", 5, "Number of workers")
 
 	flag.Parse()
 
-	if envServerAddress := os.Getenv(envAddress); envServerAddress != "" {
-		opts.ServerAddress = envServerAddress
+	if val := os.Getenv("ADDRESS"); val != "" {
+		flagServerAddress = val
 	}
-	if envPollInterval := os.Getenv(envPollInterval); envPollInterval != "" {
-		if val, err := strconv.Atoi(envPollInterval); err == nil {
-			opts.PollInterval = val
+	if val := os.Getenv("POLL_INTERVAL"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			flagPollInterval = v
 		}
 	}
-	if envReportInterval := os.Getenv(envReportInterval); envReportInterval != "" {
-		if val, err := strconv.Atoi(envReportInterval); err == nil {
-			opts.ReportInterval = val
+	if val := os.Getenv("REPORT_INTERVAL"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			flagReportInterval = v
 		}
 	}
-	if envLogLevel := os.Getenv(envLogLevel); envLogLevel != "" {
-		opts.LogLevel = envLogLevel
+	if val := os.Getenv("LOG_LEVEL"); val != "" {
+		flagLogLevel = val
 	}
-	if envKey := os.Getenv(envKey); envKey != "" {
-		opts.Key = envKey
+	if val := os.Getenv("KEY"); val != "" {
+		flagKey = val
 	}
-	if envRateLimit := os.Getenv(envRateLimit); envRateLimit != "" {
-		if val, err := strconv.Atoi(envRateLimit); err == nil {
-			opts.RateLimit = val
+	if val := os.Getenv("RATE_LIMIT"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			flagRateLimit = v
 		}
 	}
-	if envNumWorkers := os.Getenv(envNumWorkers); envNumWorkers != "" {
-		if val, err := strconv.Atoi(envNumWorkers); err == nil {
-			opts.NumWorkers = val
+	if val := os.Getenv("NUM_WORKERS"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			flagNumWorkers = v
 		}
 	}
-
-	return &opts
 }

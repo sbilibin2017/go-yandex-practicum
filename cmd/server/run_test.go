@@ -9,19 +9,24 @@ import (
 )
 
 func TestRunServer(t *testing.T) {
-	opts := &options{
-		LogLevel:      "info",
-		ServerAddress: "localhost:8085",
-		StoreInterval: 1,
-		Restore:       false,
-	}
+	flagLogLevel = "info"
+	flagServerAddress = "localhost:8085"
+	flagStoreInterval = 1
+	flagRestore = false
+	flagFileStoragePath = ""
+	flagDatabaseDSN = ""
+	flagKey = ""
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	go func() {
-		_ = run(ctx, opts)
+		_ = run(ctx)
 	}()
+
 	time.Sleep(2 * time.Second)
 	cancel()
 	time.Sleep(2 * time.Second)
+
 	assert.True(t, true, "Server run and shutdown executed successfully")
 }

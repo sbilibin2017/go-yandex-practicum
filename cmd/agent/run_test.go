@@ -9,18 +9,24 @@ import (
 )
 
 func TestRun(t *testing.T) {
-	opts := &options{
-		LogLevel:       "info",
-		PollInterval:   1,
-		ReportInterval: 5,
-		ServerAddress:  "http://example.com",
-	}
+	flagLogLevel = "info"
+	flagPollInterval = 1
+	flagReportInterval = 5
+	flagServerAddress = "http://example.com"
+	flagKey = ""
+	flagRateLimit = 0
+	flagNumWorkers = 0
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	go func() {
-		run(ctx, opts)
+		_ = run(ctx)
 	}()
+
+	time.Sleep(2 * time.Second)
 	cancel()
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
+
 	assert.True(t, true, "Test ran successfully")
 }

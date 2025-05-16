@@ -11,17 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStartMetricServerWorker_SyncStore(t *testing.T) {
+func TestMetricServerWorker_SyncStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Mocks
 	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
 	fileSaveRepo := NewMockMetricSaveFileRepository(ctrl)
 
-	// Test data
 	testMetrics := []types.Metrics{
 		{
 			MetricID: types.MetricID{ID: "foo", Type: types.GaugeMetricType},
@@ -29,26 +27,24 @@ func TestStartMetricServerWorker_SyncStore(t *testing.T) {
 		},
 	}
 
-	// Expect ListAll to be called and Save to be called once
 	memoryListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).Times(1)
 	fileSaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).Times(1)
 
-	// Manually cancel the context to simulate shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
 
-	// Call the worker with a 0-second ticker (synchronous)
-	StartMetricServerWorker(ctx, memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, nil, false)
+	worker := NewMetricServerWorker(memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, nil, false)
+	err := worker.Start(ctx)
+	assert.NoError(t, err)
 }
 
-func TestStartMetricServerWorker_AsyncStore(t *testing.T) {
+func TestMetricServerWorker_AsyncStore(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	// Mocks
 	memoryListRepo := NewMockMetricListAllMemoryRepository(ctrl)
 	memorySaveRepo := NewMockMetricSaveMemoryRepository(ctrl)
 	fileListRepo := NewMockMetricListAllFileRepository(ctrl)
@@ -61,22 +57,21 @@ func TestStartMetricServerWorker_AsyncStore(t *testing.T) {
 		},
 	}
 
-	// Save should be called at least once by the ticker and once on shutdown
 	memoryListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).MinTimes(1)
 	fileSaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).MinTimes(1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		// Let at least one ticker tick
 		time.Sleep(1200 * time.Millisecond)
 		cancel()
 	}()
 
-	// Call the worker with a 1-second ticker (asynchronous)
-	StartMetricServerWorker(ctx, memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, time.NewTicker(1*time.Second), false)
+	worker := NewMetricServerWorker(memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, time.NewTicker(1*time.Second), false)
+	err := worker.Start(ctx)
+	assert.NoError(t, err)
 }
 
-func TestStartMetricServerWorker_RestoreEnabled(t *testing.T) {
+func TestMetricServerWorker_RestoreEnabled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -92,11 +87,9 @@ func TestStartMetricServerWorker_RestoreEnabled(t *testing.T) {
 		},
 	}
 
-	// Expect file loading during restore
 	fileListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).Times(1)
 	memorySaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).Times(1)
 
-	// Also check final saving
 	memoryListRepo.EXPECT().ListAll(gomock.Any()).Return(testMetrics, nil).Times(1)
 	fileSaveRepo.EXPECT().Save(gomock.Any(), testMetrics[0]).Return(nil).Times(1)
 
@@ -106,8 +99,9 @@ func TestStartMetricServerWorker_RestoreEnabled(t *testing.T) {
 		cancel()
 	}()
 
-	// Call the worker with restore enabled
-	StartMetricServerWorker(ctx, memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, nil, true)
+	worker := NewMetricServerWorker(memoryListRepo, memorySaveRepo, fileListRepo, fileSaveRepo, nil, true)
+	err := worker.Start(ctx)
+	assert.NoError(t, err)
 }
 
 // Helper function to create float pointers
