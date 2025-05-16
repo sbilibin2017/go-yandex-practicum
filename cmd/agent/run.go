@@ -10,6 +10,7 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
+	"golang.org/x/sync/semaphore"
 )
 
 func run(ctx context.Context) error {
@@ -24,11 +25,15 @@ func run(ctx context.Context) error {
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	sem := semaphore.NewWeighted(int64(flagNumWorkers))
+
 	worker := workers.NewMetricAgentWorker(
 		metricFacade,
+		sem,
 		flagPollInterval,
-		flagReportInterval,
 		flagNumWorkers,
+		flagBatchSize,
+		flagReportInterval,
 	)
 
 	runners.RunWorker(ctx, worker)

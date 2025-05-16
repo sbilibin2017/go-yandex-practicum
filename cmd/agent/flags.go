@@ -14,6 +14,7 @@ var (
 	flagKey            string
 	flagRateLimit      int
 	flagNumWorkers     int
+	flagBatchSize      int
 )
 
 func parseFlags() {
@@ -24,6 +25,7 @@ func parseFlags() {
 	flag.StringVar(&flagKey, "k", "", "Key for HMAC SHA256 hash")
 	flag.IntVar(&flagRateLimit, "l", 0, "Max number of concurrent outgoing requests")
 	flag.IntVar(&flagNumWorkers, "w", 5, "Number of workers")
+	flag.IntVar(&flagBatchSize, "b", 100, "Metric batch size")
 
 	flag.Parse()
 
@@ -54,6 +56,11 @@ func parseFlags() {
 	if val := os.Getenv("NUM_WORKERS"); val != "" {
 		if v, err := strconv.Atoi(val); err == nil {
 			flagNumWorkers = v
+		}
+	}
+	if val := os.Getenv("BATCH_SIZE"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil {
+			flagBatchSize = v
 		}
 	}
 }
