@@ -53,18 +53,38 @@ func NewMetricServerWorker(
 }
 
 func (w *MetricServerWorker) Start(ctx context.Context) error {
-	if w.restore {
-		if err := loadMetricsFromFile(ctx, w.fileListAllRepo, w.memorySaveRepo); err != nil {
+	return startMetricServerWorker(
+		ctx,
+		w.memoryListAllRepo,
+		w.memorySaveRepo,
+		w.fileListAllRepo,
+		w.fileSaveRepo,
+		w.storeTicker,
+		w.restore,
+	)
+}
+
+func startMetricServerWorker(
+	ctx context.Context,
+	memoryListAll MetricListAllRepository,
+	memorySave MetricSaveRepository,
+	fileListAll MetricListAllFileRepository,
+	fileSave MetricSaveFileRepository,
+	storeTicker *time.Ticker,
+	restore bool,
+) error {
+	if restore {
+		if err := loadMetricsFromFile(ctx, fileListAll, memorySave); err != nil {
 			logger.Log.Error("Failed to restore metrics", zap.Error(err))
 		}
 	}
 
-	if w.storeTicker == nil {
+	if storeTicker == nil {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		if err := saveMetricsToFile(shutdownCtx, w.memoryListAllRepo, w.fileSaveRepo); err != nil {
+		if err := saveMetricsToFile(shutdownCtx, memoryListAll, fileSave); err != nil {
 			logger.Log.Error("Error saving metrics before shutdown", zap.Error(err))
 			return err
 		}
@@ -76,10 +96,10 @@ func (w *MetricServerWorker) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			return saveMetricsToFile(shutdownCtx, w.memoryListAllRepo, w.fileSaveRepo)
+			return saveMetricsToFile(shutdownCtx, memoryListAll, fileSave)
 
-		case <-w.storeTicker.C:
-			if err := saveMetricsToFile(ctx, w.memoryListAllRepo, w.fileSaveRepo); err != nil {
+		case <-storeTicker.C:
+			if err := saveMetricsToFile(ctx, memoryListAll, fileSave); err != nil {
 				logger.Log.Error("Periodic save failed", zap.Error(err))
 			}
 		}

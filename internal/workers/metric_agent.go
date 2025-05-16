@@ -2,7 +2,7 @@ package workers
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"runtime"
 	"strconv"
 	"sync"
@@ -10,11 +10,9 @@ import (
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
-	"go.uber.org/zap"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
+	"go.uber.org/zap"
 )
 
 type Result struct {
@@ -26,314 +24,397 @@ type MetricFacade interface {
 	Updates(ctx context.Context, metrics []types.Metrics) error
 }
 
+type Semaphore interface {
+	Acquire(ctx context.Context, n int64) error
+	Release(n int64)
+}
+
 type MetricAgentWorker struct {
-	metricFacade   MetricFacade
+	facade         MetricFacade
+	sem            Semaphore
 	pollInterval   int
+	workerCount    int
+	batchSize      int
 	reportInterval int
-	numWorkers     int
 }
 
 func NewMetricAgentWorker(
-	metricFacade MetricFacade,
+	facade MetricFacade,
+	sem Semaphore,
 	pollInterval int,
+	workerCount int,
+	batchSize int,
 	reportInterval int,
-	numWorkers int,
 ) *MetricAgentWorker {
 	return &MetricAgentWorker{
-		metricFacade:   metricFacade,
+		facade:         facade,
+		sem:            sem,
 		pollInterval:   pollInterval,
+		workerCount:    workerCount,
+		batchSize:      batchSize,
 		reportInterval: reportInterval,
-		numWorkers:     numWorkers,
 	}
 }
 
-func (w *MetricAgentWorker) Start(ctx context.Context) error {
-	pollInterval := w.pollInterval
-	reportInterval := w.reportInterval
+func (m *MetricAgentWorker) Start(ctx context.Context) error {
+	return startMetricAgent(
+		ctx,
+		m.facade,
+		m.sem,
+		m.pollInterval,
+		m.workerCount,
+		m.batchSize,
+		m.reportInterval,
+	)
+}
 
-	if pollInterval == 0 {
-		pollInterval = 1
-	}
-	if reportInterval == 0 {
-		reportInterval = 1
-	}
+func startMetricAgent(
+	ctx context.Context,
+	facade MetricFacade,
+	sem Semaphore,
+	pollInterval int,
+	workerCount int,
+	batchSize int,
+	reportInterval int,
+) error {
+	runtimeMetricsCh := generatorRuntimeMetrics(ctx, pollInterval)
+	gopsutilMetricsCh := generatorGopsutilMetrics(ctx, pollInterval)
+	mergedMetricsCh := fanIn(ctx, runtimeMetricsCh, gopsutilMetricsCh)
 
-	pollTicker := time.NewTicker(time.Duration(pollInterval) * time.Second)
-	defer pollTicker.Stop()
+	resultCh := make(chan Result, 10*batchSize)
+	go fanOutWorkerPool(
+		ctx,
+		facade,
+		sem,
+		mergedMetricsCh,
+		workerCount,
+		batchSize,
+		reportInterval,
+		resultCh,
+	)
 
-	reportTicker := time.NewTicker(time.Duration(reportInterval) * time.Second)
-	defer reportTicker.Stop()
-
-	generatorCh := generator(ctx, pollTicker)
-
-	runtimeStageCh := produceRuntimeGaugeMetricsStage(ctx, generatorCh)
-	runtimeCounterCh := produceRuntimeCounterMetricsStage(ctx, runtimeStageCh)
-	gopsutilCh := produceGopsutilGaugeMetricsStage(ctx, generatorCh)
-
-	metricsCh := metricsFanOut(ctx, runtimeCounterCh, gopsutilCh)
-
-	resultChs := metricsWorkerPool(ctx, w.metricFacade, metricsCh, reportTicker, w.numWorkers)
-
-	finalResultCh := fanInResults(ctx, resultChs...)
-
-	errCh := make(chan error, 1)
-	handleResults(ctx, finalResultCh, errCh)
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case res, ok := <-resultCh:
+			if !ok {
+				return nil
+			}
+			if res.err != nil {
+				logger.Log.Error("Error updating metric",
+					zap.String("metricID", res.data.MetricID.ID),
+					zap.Error(res.err),
+				)
+			}
+		}
 	}
 }
 
-func generator(ctx context.Context, pollTicker *time.Ticker) <-chan types.Metrics {
-	out := make(chan types.Metrics)
+func generatorRuntimeMetrics(ctx context.Context, pollInterval int) chan types.Metrics {
+	metricsChan := make(chan types.Metrics, 100)
+
 	go func() {
-		defer close(out)
+		ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
+		defer ticker.Stop()
+		defer close(metricsChan)
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-pollTicker.C:
-				out <- types.Metrics{}
-			}
-		}
-	}()
-	return out
-}
-
-func produceRuntimeGaugeMetricsStage(ctx context.Context, in <-chan types.Metrics) <-chan types.Metrics {
-	out := make(chan types.Metrics)
-	go func() {
-		defer close(out)
-		for range in {
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
-
-			values := []struct {
-				id    string
-				value float64
-			}{
-				{"Alloc", float64(memStats.Alloc)},
-				{"BuckHashSys", float64(memStats.BuckHashSys)},
-				{"Frees", float64(memStats.Frees)},
-				{"GCCPUFraction", memStats.GCCPUFraction},
-				{"GCSys", float64(memStats.GCSys)},
-				{"HeapAlloc", float64(memStats.HeapAlloc)},
-				{"HeapIdle", float64(memStats.HeapIdle)},
-				{"HeapInuse", float64(memStats.HeapInuse)},
-				{"HeapObjects", float64(memStats.HeapObjects)},
-				{"HeapReleased", float64(memStats.HeapReleased)},
-				{"HeapSys", float64(memStats.HeapSys)},
-				{"LastGC", float64(memStats.LastGC)},
-				{"Lookups", float64(memStats.Lookups)},
-				{"MCacheInuse", float64(memStats.MCacheInuse)},
-				{"MCacheSys", float64(memStats.MCacheSys)},
-				{"MSpanInuse", float64(memStats.MSpanInuse)},
-				{"MSpanSys", float64(memStats.MSpanSys)},
-				{"Mallocs", float64(memStats.Mallocs)},
-				{"NextGC", float64(memStats.NextGC)},
-				{"NumForcedGC", float64(memStats.NumForcedGC)},
-				{"NumGC", float64(memStats.NumGC)},
-				{"OtherSys", float64(memStats.OtherSys)},
-				{"PauseTotalNs", float64(memStats.PauseTotalNs)},
-				{"StackInuse", float64(memStats.StackInuse)},
-				{"StackSys", float64(memStats.StackSys)},
-				{"Sys", float64(memStats.Sys)},
-				{"TotalAlloc", float64(memStats.TotalAlloc)},
-				{"RandomValue", rand.Float64()},
-			}
-
-			for _, v := range values {
-				select {
-				case <-ctx.Done():
-					return
-				case out <- types.Metrics{MetricID: types.MetricID{ID: v.id, Type: types.GaugeMetricType}, Value: &v.value}:
-				}
-			}
-		}
-	}()
-	return out
-}
-
-func produceRuntimeCounterMetricsStage(ctx context.Context, in <-chan types.Metrics) <-chan types.Metrics {
-	out := make(chan types.Metrics)
-	go func() {
-		defer close(out)
-		deltas := []struct {
-			id    string
-			delta int64
-		}{
-			{"PollCount", 1},
-		}
-		for _, d := range deltas {
-			select {
-			case <-ctx.Done():
-				return
-			case out <- types.Metrics{MetricID: types.MetricID{ID: d.id, Type: types.CounterMetricType}, Delta: &d.delta}:
-			}
-		}
-	}()
-	return out
-}
-
-func produceGopsutilGaugeMetricsStage(ctx context.Context, in <-chan types.Metrics) <-chan types.Metrics {
-	out := make(chan types.Metrics, 10)
-	go func() {
-		defer close(out)
-		for range in {
-			if vmStat, err := mem.VirtualMemory(); err == nil {
-				total := float64(vmStat.Total)
-				free := float64(vmStat.Free)
-
-				select {
-				case <-ctx.Done():
-					return
-				case out <- types.Metrics{MetricID: types.MetricID{ID: "TotalMemory", Type: types.GaugeMetricType}, Value: &total}:
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case out <- types.Metrics{MetricID: types.MetricID{ID: "FreeMemory", Type: types.GaugeMetricType}, Value: &free}:
-				}
-			}
-			if cpuPercents, err := cpu.Percent(0, true); err == nil {
-				for i, percent := range cpuPercents {
-					id := "CPUutilization" + strconv.Itoa(i)
-					p := percent
-
+			case <-ticker.C:
+				for _, m := range generateRuntimeGaugeMetrics(ctx) {
 					select {
+					case metricsChan <- m:
 					case <-ctx.Done():
 						return
-					case out <- types.Metrics{MetricID: types.MetricID{ID: id, Type: types.GaugeMetricType}, Value: &p}:
+					}
+				}
+				for _, m := range generateRuntimeCounterMetrics(ctx) {
+					select {
+					case metricsChan <- m:
+					case <-ctx.Done():
+						return
 					}
 				}
 			}
 		}
 	}()
-	return out
+
+	return metricsChan
 }
 
-func metricsFanOut(ctx context.Context, chans ...<-chan types.Metrics) <-chan types.Metrics {
-	var wg sync.WaitGroup
+func generatorGopsutilMetrics(ctx context.Context, pollInterval int) chan types.Metrics {
+	metricsChan := make(chan types.Metrics, 100)
+
+	go func() {
+		defer close(metricsChan)
+
+		ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				for _, m := range generateGopsutilGaugeMetrics(ctx) {
+					select {
+					case metricsChan <- m:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	return metricsChan
+}
+func generateRuntimeGaugeMetrics(_ context.Context) []types.Metrics {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	var metrics []types.Metrics
+
+	v1 := float64(memStats.Alloc)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "Alloc", Type: types.GaugeMetricType},
+		Value:    &v1,
+	})
+
+	v2 := float64(memStats.BuckHashSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "BuckHashSys", Type: types.GaugeMetricType},
+		Value:    &v2,
+	})
+
+	v3 := float64(memStats.Frees)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "Frees", Type: types.GaugeMetricType},
+		Value:    &v3,
+	})
+
+	v4 := memStats.GCCPUFraction
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "GCCPUFraction", Type: types.GaugeMetricType},
+		Value:    &v4,
+	})
+
+	v5 := float64(memStats.GCSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "GCSys", Type: types.GaugeMetricType},
+		Value:    &v5,
+	})
+
+	v6 := float64(memStats.HeapAlloc)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapAlloc", Type: types.GaugeMetricType},
+		Value:    &v6,
+	})
+
+	v7 := float64(memStats.HeapIdle)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapIdle", Type: types.GaugeMetricType},
+		Value:    &v7,
+	})
+
+	v8 := float64(memStats.HeapInuse)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapInuse", Type: types.GaugeMetricType},
+		Value:    &v8,
+	})
+
+	v9 := float64(memStats.HeapObjects)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapObjects", Type: types.GaugeMetricType},
+		Value:    &v9,
+	})
+
+	v10 := float64(memStats.HeapReleased)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapReleased", Type: types.GaugeMetricType},
+		Value:    &v10,
+	})
+
+	v11 := float64(memStats.HeapSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "HeapSys", Type: types.GaugeMetricType},
+		Value:    &v11,
+	})
+
+	v12 := float64(memStats.LastGC)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "LastGC", Type: types.GaugeMetricType},
+		Value:    &v12,
+	})
+
+	v13 := float64(memStats.Lookups)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "Lookups", Type: types.GaugeMetricType},
+		Value:    &v13,
+	})
+
+	v14 := float64(memStats.MCacheInuse)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "MCacheInuse", Type: types.GaugeMetricType},
+		Value:    &v14,
+	})
+
+	v15 := float64(memStats.MCacheSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "MCacheSys", Type: types.GaugeMetricType},
+		Value:    &v15,
+	})
+
+	v16 := float64(memStats.MSpanInuse)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "MSpanInuse", Type: types.GaugeMetricType},
+		Value:    &v16,
+	})
+
+	v17 := float64(memStats.MSpanSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "MSpanSys", Type: types.GaugeMetricType},
+		Value:    &v17,
+	})
+
+	v18 := float64(memStats.Mallocs)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "Mallocs", Type: types.GaugeMetricType},
+		Value:    &v18,
+	})
+
+	v19 := float64(memStats.NextGC)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "NextGC", Type: types.GaugeMetricType},
+		Value:    &v19,
+	})
+
+	v20 := float64(memStats.NumForcedGC)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "NumForcedGC", Type: types.GaugeMetricType},
+		Value:    &v20,
+	})
+
+	v21 := float64(memStats.NumGC)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "NumGC", Type: types.GaugeMetricType},
+		Value:    &v21,
+	})
+
+	v22 := float64(memStats.OtherSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "OtherSys", Type: types.GaugeMetricType},
+		Value:    &v22,
+	})
+
+	v23 := float64(memStats.PauseTotalNs)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "PauseTotalNs", Type: types.GaugeMetricType},
+		Value:    &v23,
+	})
+
+	v24 := float64(memStats.StackInuse)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "StackInuse", Type: types.GaugeMetricType},
+		Value:    &v24,
+	})
+
+	v25 := float64(memStats.StackSys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "StackSys", Type: types.GaugeMetricType},
+		Value:    &v25,
+	})
+
+	v26 := float64(memStats.Sys)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "Sys", Type: types.GaugeMetricType},
+		Value:    &v26,
+	})
+
+	v27 := float64(memStats.TotalAlloc)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "TotalAlloc", Type: types.GaugeMetricType},
+		Value:    &v27,
+	})
+
+	v28 := rand.Float64()
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "RandomValue", Type: types.GaugeMetricType},
+		Value:    &v28,
+	})
+
+	return metrics
+}
+
+func generateRuntimeCounterMetrics(_ context.Context) []types.Metrics {
+	var metrics []types.Metrics
+
+	v1 := int64(1)
+	metrics = append(metrics, types.Metrics{
+		MetricID: types.MetricID{ID: "PollCount", Type: types.CounterMetricType},
+		Delta:    &v1,
+	})
+
+	return metrics
+}
+
+func generateGopsutilGaugeMetrics(ctx context.Context) []types.Metrics {
+	var metrics []types.Metrics
+
+	if vmStat, err := mem.VirtualMemory(); err == nil {
+		total := float64(vmStat.Total)
+		free := float64(vmStat.Free)
+
+		metrics = append(metrics, types.Metrics{
+			MetricID: types.MetricID{ID: "TotalMemory", Type: types.GaugeMetricType},
+			Value:    &total,
+		})
+		metrics = append(metrics, types.Metrics{
+			MetricID: types.MetricID{ID: "FreeMemory", Type: types.GaugeMetricType},
+			Value:    &free,
+		})
+	}
+
+	if cpuPercents, err := cpu.PercentWithContext(ctx, 0, true); err == nil {
+		for i, percent := range cpuPercents {
+			p := percent
+			id := "CPUutilization" + strconv.Itoa(i)
+
+			metrics = append(metrics, types.Metrics{
+				MetricID: types.MetricID{ID: id, Type: types.GaugeMetricType},
+				Value:    &p,
+			})
+		}
+	}
+
+	return metrics
+}
+
+func fanIn(ctx context.Context, chans ...<-chan types.Metrics) <-chan types.Metrics {
 	out := make(chan types.Metrics)
 
-	output := func(c <-chan types.Metrics) {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case m, ok := <-c:
-				if !ok {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case out <- m:
-				}
-			}
-		}
-	}
-
-	wg.Add(len(chans))
-	for _, c := range chans {
-		go output(c)
-	}
-
-	go func() {
-		wg.Wait()
-		close(out)
-	}()
-	return out
-}
-
-func metricsWorker(
-	ctx context.Context,
-	handler MetricFacade,
-	taskCh <-chan types.Metrics,
-	reportTicker *time.Ticker,
-	sem *semaphore.Weighted,
-) <-chan Result {
-	resultCh := make(chan Result, 1000)
-	metricsBatch := make([]types.Metrics, 0, 1000)
-
-	go func() {
-		defer close(resultCh)
-
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return
-		}
-		defer sem.Release(1)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case metric, ok := <-taskCh:
-				if !ok {
-					if len(metricsBatch) > 0 {
-						err := handler.Updates(ctx, metricsBatch)
-						for _, metric := range metricsBatch {
-							resultCh <- Result{data: metric, err: err}
-						}
-					}
-					return
-				}
-				metricsBatch = append(metricsBatch, metric)
-
-			case <-reportTicker.C:
-				if len(metricsBatch) == 0 {
-					continue
-				}
-				err := handler.Updates(ctx, metricsBatch)
-				for _, metric := range metricsBatch {
-					resultCh <- Result{data: metric, err: err}
-				}
-				metricsBatch = metricsBatch[:0]
-			}
-		}
-	}()
-
-	return resultCh
-}
-
-func metricsWorkerPool(
-	ctx context.Context,
-	handler MetricFacade,
-	taskCh <-chan types.Metrics,
-	reportTicker *time.Ticker,
-	numWorkers int,
-) []<-chan Result {
-	sem := semaphore.NewWeighted(int64(numWorkers))
-	resultChs := make([]<-chan Result, numWorkers)
-	for i := 0; i < numWorkers; i++ {
-		resultChs[i] = metricsWorker(ctx, handler, taskCh, reportTicker, sem)
-	}
-	return resultChs
-}
-
-func fanInResults(ctx context.Context, resultChs ...<-chan Result) <-chan Result {
-	finalCh := make(chan Result)
 	var wg sync.WaitGroup
+	wg.Add(len(chans))
 
-	for _, ch := range resultChs {
-		wg.Add(1)
-		go func(c <-chan Result) {
+	for _, ch := range chans {
+		go func(c <-chan types.Metrics) {
 			defer wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case res, ok := <-c:
+				case m, ok := <-c:
 					if !ok {
 						return
 					}
-					finalCh <- res
+					select {
+					case out <- m:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}(ch)
@@ -341,38 +422,103 @@ func fanInResults(ctx context.Context, resultChs ...<-chan Result) <-chan Result
 
 	go func() {
 		wg.Wait()
-		close(finalCh)
+		close(out)
 	}()
 
-	return finalCh
+	return out
 }
 
-func handleResults(ctx context.Context, resultCh <-chan Result, errCh chan<- error) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case res, ok := <-resultCh:
-				if !ok {
-					return
-				}
-				if res.err != nil {
-					logger.Log.Error("Ошибка отправки метрики",
-						zap.String("metric", res.data.MetricID.ID),
-						zap.Error(res.err),
-					)
-					// Передаём первую ошибку
-					select {
-					case errCh <- res.err:
-					default:
+func fanOutWorker(
+	ctx context.Context,
+	facade MetricFacade,
+	sem Semaphore,
+	inputCh <-chan types.Metrics,
+	batchSize int,
+	reportInterval int,
+	resultCh chan<- Result,
+) {
+	batch := make([]types.Metrics, 0, batchSize)
+	dur := time.Duration(reportInterval) * time.Second
+	timer := time.NewTimer(dur)
+	defer timer.Stop()
+
+	sendBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return
+		}
+
+		batchCopy := append([]types.Metrics(nil), batch...)
+		batch = batch[:0]
+
+		go func() {
+			defer sem.Release(1)
+
+			err := facade.Updates(ctx, batchCopy)
+			if err != nil {
+				for _, m := range batchCopy {
+					resultCh <- Result{
+						data: m,
+						err:  err,
 					}
-				} else {
-					logger.Log.Info("Метрика успешно отправлена",
-						zap.String("metric", res.data.MetricID.ID),
-					)
 				}
 			}
+		}()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			sendBatch()
+			return
+
+		case m, ok := <-inputCh:
+			if !ok {
+				sendBatch()
+				return
+			}
+			batch = append(batch, m)
+
+			if len(batch) >= batchSize {
+				sendBatch()
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timer.Reset(dur)
+			}
+
+		case <-timer.C:
+			sendBatch()
+			timer.Reset(dur)
 		}
+	}
+}
+
+func fanOutWorkerPool(
+	ctx context.Context,
+	facade MetricFacade,
+	sem Semaphore,
+	inputCh <-chan types.Metrics,
+	workerCount int,
+	batchSize int,
+	reportInterval int,
+	resultCh chan<- Result,
+) {
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+
+	for i := 0; i < workerCount; i++ {
+		go func() {
+			defer wg.Done()
+			fanOutWorker(ctx, facade, sem, inputCh, batchSize, reportInterval, resultCh)
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
 	}()
 }
