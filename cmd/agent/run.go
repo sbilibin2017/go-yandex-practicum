@@ -20,7 +20,7 @@ func run(ctx context.Context) error {
 
 	client := resty.New()
 
-	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagKey)
+	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagKey, flagHeader)
 
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -28,6 +28,7 @@ func run(ctx context.Context) error {
 	sem := semaphore.NewWeighted(int64(flagNumWorkers))
 
 	worker := workers.NewMetricAgentWorker(
+		ctx,
 		metricFacade,
 		sem,
 		flagPollInterval,

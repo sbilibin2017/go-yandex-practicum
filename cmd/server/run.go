@@ -123,9 +123,9 @@ func run(ctx context.Context) error {
 
 	router.Use(
 		middlewares.LoggingMiddleware,
-		middlewares.HashMiddleware(flagKey),
+		middlewares.HashMiddleware(flagKey, flagHeader),
 		middlewares.GzipMiddleware,
-		middlewares.TxMiddleware(db),
+		middlewares.TxMiddleware(db, middlewares.SetTx),
 		middlewares.DBRetryMiddleware,
 	)
 
@@ -145,19 +145,17 @@ func run(ctx context.Context) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var worker *workers.MetricServerWorker
 	if metricListAllFileRepository != nil && metricSaveFileRepository != nil {
-		worker = workers.NewMetricServerWorker(
+		worker := workers.NewMetricServerWorker(
+			ctx,
 			metricListAllContextRepository,
 			metricSaveContextRepository,
 			metricListAllFileRepository,
 			metricSaveFileRepository,
-			storeTicker,
 			flagRestore,
+			flagStoreInterval,
 		)
-	}
 
-	if worker != nil {
 		err := runners.RunWorker(ctx, worker)
 		if err != nil {
 			return err

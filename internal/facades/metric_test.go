@@ -2,42 +2,44 @@ package facades
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/hash"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func TestNewMetricFacade_AddsHTTPPrefix(t *testing.T) {
-	t.Run("adds http:// when no scheme is present", func(t *testing.T) {
-		rawAddress := "example.com"
-		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress, "")
-		assert.Equal(t, "http://example.com", facade.client.BaseURL)
-	})
+	client := resty.New()
 
-	t.Run("preserves http:// prefix", func(t *testing.T) {
-		rawAddress := "http://example.com"
-		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress, "")
-		assert.Equal(t, "http://example.com", facade.client.BaseURL)
-	})
+	// Адрес без http/https
+	addr := "example.com"
+	facade := NewMetricFacade(client, addr, "key", "HashSHA256")
 
-	t.Run("preserves https:// prefix", func(t *testing.T) {
-		rawAddress := "https://example.com"
-		client := resty.New()
-		facade := NewMetricFacade(client, rawAddress, "")
-		assert.Equal(t, "https://example.com", facade.client.BaseURL)
-	})
+	// Проверяем, что у клиента установлен базовый URL с префиксом http://
+	assert.True(t, facade.client.BaseURL != "", "BaseURL should be set")
+
+	baseURL := facade.client.BaseURL
+	assert.True(t, strings.HasPrefix(baseURL, "http://"), "BaseURL should start with http://")
+
+	// Если адрес уже с префиксом https://
+	addrHTTPS := "https://secure.com"
+	facade2 := NewMetricFacade(client, addrHTTPS, "key", "HashSHA256")
+	assert.Equal(t, addrHTTPS, facade2.client.BaseURL)
 }
 
 func TestMetricFacade_Updates(t *testing.T) {
 	key := "secretkey"
+	headerName := "HashSHA256"
+
 	tests := []struct {
 		name            string
 		serverHandler   http.HandlerFunc
@@ -45,19 +47,26 @@ func TestMetricFacade_Updates(t *testing.T) {
 		serverURL       string
 		expectError     bool
 		expectedErrPart string
-		withKey         bool
+		key             string
+		header          string
 	}{
 		{
 			name: "Success gauge metric with key",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
 				assert.Equal(t, "/updates/", r.URL.Path)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
-				receivedHash := r.Header.Get(hash.Header)
+				receivedHash := r.Header.Get(headerName)
 				assert.NotEmpty(t, receivedHash)
 
 				bodyBytes := readRequestBody(t, r)
-				expectedHash := hash.HashWithKey(bodyBytes, key)
+
+				// Вычисляем хэш напрямую (вместо вызова hash.HashWithKey)
+				h := hmac.New(sha256.New, []byte(key))
+				h.Write(bodyBytes)
+				expectedHash := hex.EncodeToString(h.Sum(nil))
+
 				assert.Equal(t, expectedHash, receivedHash)
 
 				w.WriteHeader(http.StatusOK)
@@ -72,14 +81,16 @@ func TestMetricFacade_Updates(t *testing.T) {
 				},
 			},
 			expectError: false,
-			withKey:     true,
+			key:         key,
+			header:      headerName,
 		},
 		{
 			name: "Success counter metric without key",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
 				assert.Equal(t, "/updates/", r.URL.Path)
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-				assert.Empty(t, r.Header.Get(hash.Header))
+				assert.Empty(t, r.Header.Get(headerName))
 				w.WriteHeader(http.StatusOK)
 			},
 			request: []types.Metrics{
@@ -92,11 +103,13 @@ func TestMetricFacade_Updates(t *testing.T) {
 				},
 			},
 			expectError: false,
-			withKey:     false,
+			key:         "",
+			header:      headerName,
 		},
 		{
 			name: "Server returns error",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
 				http.Error(w, "bad request", http.StatusBadRequest)
 			},
 			request: []types.Metrics{
@@ -110,11 +123,12 @@ func TestMetricFacade_Updates(t *testing.T) {
 			},
 			expectError:     true,
 			expectedErrPart: "error response from server",
-			withKey:         false,
+			key:             "",
+			header:          headerName,
 		},
 		{
-			name:          "Bad URL",
-			serverHandler: nil,
+			name:      "Bad URL",
+			serverURL: "http://invalid-host.local",
 			request: []types.Metrics{
 				{
 					MetricID: types.MetricID{
@@ -124,10 +138,10 @@ func TestMetricFacade_Updates(t *testing.T) {
 					Value: float64Ptr(0.1),
 				},
 			},
-			serverURL:       "http://invalid-host.local",
 			expectError:     true,
 			expectedErrPart: "failed to send metrics",
-			withKey:         false,
+			key:             "",
+			header:          headerName,
 		},
 	}
 
@@ -142,13 +156,10 @@ func TestMetricFacade_Updates(t *testing.T) {
 			}
 
 			client := resty.New()
-			var facade *MetricFacade
-			if tt.withKey {
-				facade = NewMetricFacade(client, serverURL, key)
-			} else {
-				facade = NewMetricFacade(client, serverURL, "")
-			}
+			facade := NewMetricFacade(client, serverURL, tt.key, tt.header)
+
 			err := facade.Updates(context.Background(), tt.request)
+
 			if tt.expectError {
 				assert.Error(t, err)
 				if tt.expectedErrPart != "" {
@@ -173,6 +184,12 @@ func readRequestBody(t *testing.T, r *http.Request) []byte {
 	t.Helper()
 	body, err := io.ReadAll(r.Body)
 	assert.NoError(t, err)
-	r.Body.Close()
 	return body
+}
+
+func TestMetricFacade_Updates_EmptyMetrics(t *testing.T) {
+	client := resty.New()
+	facade := NewMetricFacade(client, "http://localhost", "key", "HashSHA256")
+	err := facade.Updates(context.Background(), []types.Metrics{})
+	assert.NoError(t, err)
 }

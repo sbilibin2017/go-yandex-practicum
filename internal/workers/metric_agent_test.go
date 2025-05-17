@@ -3,8 +3,6 @@ package workers
 import (
 	"context"
 	"errors"
-	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,334 +12,588 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateRuntimeGaugeMetrics(t *testing.T) {
-	metrics := generateRuntimeGaugeMetrics(context.Background())
-	assert.NotEmpty(t, metrics)
-	var allocMetric *types.Metrics
-	for _, m := range metrics {
-		if m.MetricID.ID == "Alloc" {
-			allocMetric = &m
-			break
-		}
-	}
-	assert.NotNil(t, allocMetric)
-	assert.Equal(t, types.GaugeMetricType, allocMetric.MetricID.Type)
-	assert.NotNil(t, allocMetric.Value)
-	assert.GreaterOrEqual(t, *allocMetric.Value, 0.0)
-}
-
-func TestGenerateRuntimeCounterMetrics(t *testing.T) {
-	metrics := generateRuntimeCounterMetrics(context.Background())
-	assert.NotEmpty(t, metrics)
-	var pollCountMetric *types.Metrics
-	for _, m := range metrics {
-		if m.MetricID.ID == "PollCount" {
-			pollCountMetric = &m
-			break
-		}
-	}
-	assert.NotNil(t, pollCountMetric)
-	assert.Equal(t, types.CounterMetricType, pollCountMetric.MetricID.Type)
-	assert.NotNil(t, pollCountMetric.Delta)
-	assert.Equal(t, int64(1), *pollCountMetric.Delta)
-}
-
-func TestGenerateGopsutilGaugeMetrics(t *testing.T) {
+func TestMetricsFanOut_SemaphoreAcquireError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 	ctx := context.Background()
-	metrics := generateGopsutilGaugeMetrics(ctx)
-	assert.NotEmpty(t, metrics)
-	var totalMem, freeMem *types.Metrics
-	for _, m := range metrics {
-		if m.MetricID.ID == "TotalMemory" {
-			totalMem = &m
-		}
-		if m.MetricID.ID == "FreeMemory" {
-			freeMem = &m
-		}
-	}
-	assert.NotNil(t, totalMem)
-	assert.NotNil(t, totalMem.Value)
-	assert.GreaterOrEqual(t, *totalMem.Value, 0.0)
-	assert.NotNil(t, freeMem)
-	assert.NotNil(t, freeMem.Value)
-	assert.GreaterOrEqual(t, *freeMem.Value, 0.0)
-	cpuFound := false
-	for _, m := range metrics {
-		if len(m.MetricID.ID) > len("CPUutilization") && m.MetricID.ID[:len("CPUutilization")] == "CPUutilization" {
-			cpuFound = true
-			assert.NotNil(t, m.Value)
-			assert.GreaterOrEqual(t, *m.Value, 0.0)
-			_, err := strconv.Atoi(m.MetricID.ID[len("CPUutilization"):])
-			assert.NoError(t, err)
-		}
-	}
-	assert.True(t, cpuFound)
-}
-
-func TestGeneratorGopsutilMetrics(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pollInterval := 1
-	metricsChan := generatorGopsutilMetrics(ctx, pollInterval)
-	var received []types.Metrics
-	timeout := time.After(5 * time.Second)
-loop:
-	for {
-		select {
-		case m, ok := <-metricsChan:
-			if !ok {
-				break loop
-			}
-			received = append(received, m)
-			if len(received) >= 3 {
-				break loop
-			}
-		case <-timeout:
-			t.Fatal("Timeout waiting for metrics")
-		}
-	}
-	assert.NotEmpty(t, received)
-	cancel()
-	timeoutClose := time.After(2 * time.Second)
-	for {
-		select {
-		case _, ok := <-metricsChan:
-			if !ok {
-				return
-			}
-		case <-timeoutClose:
-			t.Fatal("Timeout waiting for channel to close after cancel")
+	mockFacade := NewMockMetricFacade(ctrl)
+	mockSema := NewMockSemaphore(ctrl)
+	numWorkers := 3
+	batchSize := 10
+	inputCh := make(chan types.Metrics)
+	mockSema.EXPECT().Acquire(gomock.Any(), int64(1)).Return(errors.New("acquire error")).Times(numWorkers)
+	channels := metricsFanOut(ctx, mockFacade, mockSema, numWorkers, batchSize, inputCh)
+	for i, ch := range channels {
+		if ch != nil {
+			t.Errorf("expected channel at index %d to be nil, but got %v", i, ch)
 		}
 	}
 }
 
-func TestGeneratorRuntimeMetrics(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pollInterval := 1
-	metricsChan := generatorRuntimeMetrics(ctx, pollInterval)
-	var received []types.Metrics
-	timeout := time.After(5 * time.Second)
-loop:
-	for {
-		select {
-		case m, ok := <-metricsChan:
-			if !ok {
-				break loop
-			}
-			received = append(received, m)
-			if len(received) >= 5 {
-				break loop
-			}
-		case <-timeout:
-			t.Fatal("Timeout waiting for metrics")
-		}
-	}
-	assert.NotEmpty(t, received)
-	cancel()
-	timeoutClose := time.After(2 * time.Second)
-	for {
-		select {
-		case _, ok := <-metricsChan:
-			if !ok {
-				return
-			}
-		case <-timeoutClose:
-			t.Fatal("Timeout waiting for channel to close after cancel")
-		}
-	}
-}
-
-func TestFanIn(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch1 := make(chan types.Metrics)
-	ch2 := make(chan types.Metrics)
-	out := fanIn(ctx, ch1, ch2)
-	go func() {
-		ch1 <- types.Metrics{MetricID: types.MetricID{ID: "m1"}, Value: ptrFloat64(1)}
-		ch1 <- types.Metrics{MetricID: types.MetricID{ID: "m2"}, Value: ptrFloat64(2)}
-		close(ch1)
-	}()
-	go func() {
-		ch2 <- types.Metrics{MetricID: types.MetricID{ID: "m3"}, Value: ptrFloat64(3)}
-		ch2 <- types.Metrics{MetricID: types.MetricID{ID: "m4"}, Value: ptrFloat64(4)}
-		close(ch2)
-	}()
-	var received []types.Metrics
-	for m := range out {
-		received = append(received, m)
-	}
-	assert.Len(t, received, 4)
-	_, ok := <-out
-	assert.False(t, ok)
-}
-
-func ptrFloat64(f float64) *float64 {
-	return &f
-}
-
-func TestFanOutWorker_BatchSend(t *testing.T) {
+func TestStartMetricAgent_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+	facade := NewMockMetricFacade(ctrl)
+	sema := NewMockSemaphore(ctrl)
 
-	mockFacade := NewMockMetricFacade(ctrl)
-	mockSemaphore := NewMockSemaphore(ctrl)
+	facade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		AnyTimes().
+		Return(nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	sema.EXPECT().
+		Acquire(gomock.Any(), gomock.Any()).
+		AnyTimes().
+		Return(nil)
+
+	sema.EXPECT().
+		Release(gomock.Any()).
+		AnyTimes()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	inputCh := make(chan types.Metrics)
-	resultCh := make(chan result, 10)
+	errCh := make(chan error, 1)
 
-	metrics := []types.Metrics{
-		{
-			MetricID: types.MetricID{ID: "metric1", Type: types.GaugeMetricType},
-			Value:    floatPtr(1.1),
-		},
-		{
-			MetricID: types.MetricID{ID: "metric2", Type: types.GaugeMetricType},
-			Value:    floatPtr(2.2),
-		},
-	}
+	go func() {
+		errCh <- NewMetricAgentWorker(
+			ctx,
+			facade,
+			sema,
+			1, // poll interval 1 second
+			1, // report interval 1 second
+			1,
+			1,
+		)(ctx)
+	}()
 
-	mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil)
-	mockSemaphore.EXPECT().Release(int64(1))
-	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Len(2)).Return(errors.New("update error"))
+	time.Sleep(1500 * time.Millisecond) // Ждем немного, чтобы worker поработал
 
-	go fanOutWorker(ctx, mockFacade, mockSemaphore, inputCh, 2, 1, resultCh)
+	cancel() // Отменяем контекст
 
-	inputCh <- metrics[0]
-	inputCh <- metrics[1]
+	err := <-errCh
+	require.ErrorIs(t, err, context.Canceled)
+}
 
-	time.Sleep(100 * time.Millisecond)
-	close(inputCh)
+func TestWaitForErrors(t *testing.T) {
+	t.Run("error received", func(t *testing.T) {
+		errCh := make(chan error, 1)
+		errCh <- errors.New("some error")
+		close(errCh)
 
-	var gotResults []result
-	for i := 0; i < 2; i++ {
+		ctx := context.Background()
+		err := waitForErrors(ctx, errCh)
+		require.Error(t, err)
+		require.EqualError(t, err, "some error")
+	})
+	t.Run("channel closed without error", func(t *testing.T) {
+		errCh := make(chan error)
+		close(errCh)
+
+		ctx := context.Background()
+		err := waitForErrors(ctx, errCh)
+		require.NoError(t, err)
+	})
+	t.Run("context cancelled", func(t *testing.T) {
+		errCh := make(chan error)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitForErrors(ctx, errCh)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestGeneratorRuntimeGaugeMetrics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := generatorRuntimeGaugeMetrics(ctx)
+	for i := 0; i < 5; i++ {
 		select {
-		case res := <-resultCh:
-			gotResults = append(gotResults, res)
+		case m, ok := <-ch:
+			assert.True(t, ok, "канал должен быть открыт")
+			assert.NotNil(t, m.Value, "метрика должна иметь значение")
 		case <-time.After(time.Second):
-			t.Fatal("timeout waiting for results")
+			t.Fatal("таймаут ожидания метрики")
+		}
+	}
+	cancel()
+	timeout := time.After(time.Second)
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				closed = true
+			}
+		case <-timeout:
+			t.Fatal("таймаут ожидания закрытия канала")
 		}
 	}
 
-	require.Len(t, gotResults, 2)
-	for _, res := range gotResults {
-		require.EqualError(t, res.err, "update error")
+	assert.True(t, closed, "канал должен быть закрыт после отмены контекста")
+}
+
+func TestGeneratorRuntimeCounterMetrics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := generatorRuntimeCounterMetrics(ctx)
+	select {
+	case m, ok := <-ch:
+		assert.True(t, ok, "канал должен быть открыт")
+		assert.Equal(t, "PollCount", m.ID)
+		assert.Equal(t, types.CounterMetricType, m.Type)
+		assert.NotNil(t, m.Delta)
+		assert.Equal(t, int64(1), *m.Delta)
+	case <-time.After(time.Second):
+		t.Fatal("таймаут ожидания метрики")
+	}
+	cancel()
+	select {
+	case _, ok := <-ch:
+		assert.False(t, ok, "канал должен быть закрыт после отмены контекста")
+	case <-time.After(time.Second):
+		t.Fatal("таймаут ожидания закрытия канала")
 	}
 }
 
-func TestFanOutWorkerPool(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockFacade := NewMockMetricFacade(ctrl)
-	mockSemaphore := NewMockSemaphore(ctrl)
-
+func TestGeneratorGoputilMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ch := generatorGoputilMetrics(ctx)
+	received := map[string]bool{}
+	timeout := time.After(2 * time.Second)
+loop:
+	for {
+		select {
+		case m, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			assert.NotNil(t, m.Value)
+			assert.Equal(t, types.GaugeMetricType, m.Type)
+			received[m.ID] = true
+		case <-timeout:
+			t.Fatal("таймаут ожидания метрик")
+		}
+	}
+	assert.True(t, received["TotalMemory"], "должна быть метрика TotalMemory")
+	assert.True(t, received["FreeMemory"], "должна быть метрика FreeMemory")
+	foundCPU := false
+	for id := range received {
+		if len(id) > 14 && id[:14] == "CPUutilization" {
+			foundCPU = true
+			break
+		}
+	}
+	assert.True(t, foundCPU, "должна быть хотя бы одна метрика CPUutilization")
+}
 
-	inputCh := make(chan types.Metrics)
-	resultCh := make(chan result, 10)
+func TestGeneratorGoputilMetrics_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := generatorGoputilMetrics(ctx)
+	cancel()
+	select {
+	case _, ok := <-ch:
+		assert.False(t, ok, "канал должен быть закрыт после отмены контекста")
+	case <-time.After(time.Second):
+		t.Fatal("таймаут ожидания закрытия канала")
+	}
+}
 
-	batchSize := 2
-	reportInterval := 1
-	workerCount := 1
+func TestMetricsFanIn_MergesChannels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch1 := make(chan types.Metrics, 2)
+	ch2 := make(chan types.Metrics, 2)
+	m1 := types.Metrics{MetricID: types.MetricID{ID: "m1"}}
+	m2 := types.Metrics{MetricID: types.MetricID{ID: "m2"}}
+	m3 := types.Metrics{MetricID: types.MetricID{ID: "m3"}}
+	ch1 <- m1
+	ch1 <- m2
+	close(ch1)
+	ch2 <- m3
+	close(ch2)
+	resultCh := metricsFanIn(ctx, ch1, ch2)
+	received := map[string]bool{}
+	for m := range resultCh {
+		received[m.ID] = true
+	}
+	assert.Len(t, received, 3, "должны получить 3 метрики из двух каналов")
+	assert.Contains(t, received, "m1")
+	assert.Contains(t, received, "m2")
+	assert.Contains(t, received, "m3")
+}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	gomock.InOrder(
-		mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil),
-		mockFacade.EXPECT().Updates(gomock.Any(), gomock.Len(batchSize)).Do(func(_ context.Context, _ []types.Metrics) {
-			wg.Done()
-		}).Return(nil),
-		mockSemaphore.EXPECT().Release(int64(1)),
-	)
-
-	go fanOutWorkerPool(ctx, mockFacade, mockSemaphore, inputCh, workerCount, batchSize, reportInterval, resultCh)
-
-	inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType}}
-	inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m2", Type: types.CounterMetricType}}
-
-	wg.Wait()
-
-	close(inputCh)
-
+func TestMetricsFanIn_ClosesFinalChannelAfterInputClosed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := make(chan types.Metrics, 1)
+	ch <- types.Metrics{MetricID: types.MetricID{ID: "test"}}
+	close(ch)
+	resultCh := metricsFanIn(ctx, ch)
 	for range resultCh {
 	}
+	assert.True(t, true)
+}
 
+func TestMetricsFanIn_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ch1 := make(chan types.Metrics)
+	ch2 := make(chan types.Metrics)
+	resultCh := metricsFanIn(ctx, ch1, ch2)
 	cancel()
+	select {
+	case _, ok := <-resultCh:
+		assert.False(t, ok, "канал должен быть закрыт после отмены контекста")
+	case <-time.After(time.Second):
+		t.Fatal("таймаут ожидания закрытия канала после отмены контекста")
+	}
 }
 
-func int64Ptr(i int64) *int64 {
-	return &i
-}
-
-func TestStartMetricAgent(t *testing.T) {
+func TestMetricsHandler_BatchProcessing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	mockFacade := NewMockMetricFacade(ctrl)
-	mockSemaphore := NewMockSemaphore(ctrl)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	batchSize := 2
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, batch []types.Metrics) error {
+			assert.Len(t, batch, batchSize)
+			return nil
+		}).Times(1)
 
-	mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil).AnyTimes()
-	mockSemaphore.EXPECT().Release(int64(1)).AnyTimes()
-
-	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-	errCh := make(chan error, 1)
-
+	resultCh := metricsHandler(ctx, mockFacade, inputCh, batchSize)
 	go func() {
-		err := startMetricAgent(ctx, mockFacade, mockSemaphore, 1, 2, 2, 1)
-		errCh <- err
+		defer close(inputCh)
+		inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m1"}}
+		inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m2"}}
 	}()
-
-	time.Sleep(100 * time.Millisecond)
-
-	cancel()
-
-	err := <-errCh
-	require.ErrorIs(t, err, context.Canceled)
+	results := []result{}
+	for r := range resultCh {
+		results = append(results, r)
+	}
+	assert.Len(t, results, 2)
+	for _, r := range results {
+		assert.NoError(t, r.err)
+	}
 }
 
-func TestNewMetricAgentWorkerAndStart(t *testing.T) {
+func TestMetricsHandler_PartialBatchOnClose(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
+	mockFacade := NewMockMetricFacade(ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	batchSize := 3
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, batch []types.Metrics) error {
+			assert.Len(t, batch, 2)
+			return nil
+		}).Times(1)
+	resultCh := metricsHandler(ctx, mockFacade, inputCh, batchSize)
+	go func() {
+		defer close(inputCh)
+		inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m1"}}
+		inputCh <- types.Metrics{MetricID: types.MetricID{ID: "m2"}}
+	}()
+	results := []result{}
+	for r := range resultCh {
+		results = append(results, r)
+	}
+	assert.Len(t, results, 2)
+	for _, r := range results {
+		assert.NoError(t, r.err)
+	}
+}
 
+func TestMetricsHandler_ContextCancelled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockFacade := NewMockMetricFacade(ctrl)
+	ctx, cancel := context.WithCancel(context.Background())
+	inputCh := make(chan types.Metrics)
+	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Any()).Times(0)
+	resultCh := metricsHandler(ctx, mockFacade, inputCh, 2)
+	cancel()
+	select {
+	case _, ok := <-resultCh:
+		assert.False(t, ok, "resultCh должен быть закрыт после отмены контекста")
+	case <-time.After(time.Second):
+		t.Fatal("таймаут ожидания закрытия resultCh после отмены контекста")
+	}
+}
+
+func TestMetricsFanOut_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 	mockFacade := NewMockMetricFacade(ctrl)
 	mockSemaphore := NewMockSemaphore(ctrl)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	numWorkers := 3
+	batchSize := 2
+	inputCh := make(chan types.Metrics)
+	for i := 0; i < numWorkers; i++ {
+		mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil).Times(1)
+		mockSemaphore.EXPECT().Release(int64(1)).Times(1)
+	}
+	channels := metricsFanOut(ctx, mockFacade, mockSemaphore, numWorkers, batchSize, inputCh)
+	require.Len(t, channels, numWorkers)
+	for _, ch := range channels {
+		assert.NotNil(t, ch)
+	}
+}
 
-	mockSemaphore.EXPECT().Acquire(gomock.Any(), int64(1)).Return(nil).AnyTimes()
-	mockSemaphore.EXPECT().Release(int64(1)).AnyTimes()
-
-	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-	worker := NewMetricAgentWorker(
-		mockFacade,
-		mockSemaphore,
-		1,
-		1,
-		2,
-		2,
-	)
-
+func TestPollMetrics_ForwardMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	errCh := make(chan error, 1)
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	pollInterval := 10 * time.Millisecond
+	outputCh := pollMetrics(ctx, pollInterval, inputCh)
+	val1 := 42.0
+	delta1 := int64(5)
+	val2 := 99.9
+	delta2 := int64(100)
 	go func() {
-		err := worker.Start(ctx)
-		errCh <- err
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric1",
+				Type: types.GaugeMetricType,
+			},
+			Value: &val1,
+		}
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric2",
+				Type: types.CounterMetricType,
+			},
+			Delta: &delta1,
+		}
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric3",
+				Type: types.GaugeMetricType,
+			},
+			Value: &val2,
+		}
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric4",
+				Type: types.CounterMetricType,
+			},
+			Delta: &delta2,
+		}
+		close(inputCh)
 	}()
+	var got []types.Metrics
+	timeout := time.After(200 * time.Millisecond)
 
-	time.Sleep(100 * time.Millisecond)
+LOOP:
+	for {
+		select {
+		case m, ok := <-outputCh:
+			if !ok {
+				break LOOP
+			}
+			got = append(got, m)
+		case <-timeout:
+			t.Fatal("timeout waiting for metrics")
+		}
+	}
+	assert.Len(t, got, 4)
+	assert.Equal(t, "metric1", got[0].ID)
+	assert.NotNil(t, got[0].Value)
+	assert.Nil(t, got[0].Delta)
+	assert.Equal(t, "metric2", got[1].ID)
+	assert.NotNil(t, got[1].Delta)
+	assert.Nil(t, got[1].Value)
+	assert.Equal(t, "metric3", got[2].ID)
+	assert.Equal(t, val2, *got[2].Value)
+	assert.Equal(t, "metric4", got[3].ID)
+	assert.Equal(t, delta2, *got[3].Delta)
+}
 
+func TestPollMetrics_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	inputCh := make(chan types.Metrics)
+	pollInterval := 50 * time.Millisecond
+	outputCh := pollMetrics(ctx, pollInterval, inputCh)
 	cancel()
+	select {
+	case _, ok := <-outputCh:
+		assert.False(t, ok, "output channel should be closed after context cancel")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: output channel not closed after cancel")
+	}
+}
 
-	err := <-errCh
-	require.ErrorIs(t, err, context.Canceled)
+func TestPollMetrics_InputChannelClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	pollInterval := 10 * time.Millisecond
+	outputCh := pollMetrics(ctx, pollInterval, inputCh)
+	close(inputCh)
+	select {
+	case _, ok := <-outputCh:
+		assert.False(t, ok, "output channel should be closed when input channel is closed")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: output channel not closed after input channel close")
+	}
+}
+
+func TestReportMetrics_ForwardMetrics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	reportInterval := 10 * time.Millisecond
+	outputCh := reportMetrics(ctx, reportInterval, inputCh)
+	val := 1.23
+	delta := int64(42)
+	go func() {
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "gaugeMetric",
+				Type: types.GaugeMetricType,
+			},
+			Value: &val,
+		}
+		inputCh <- types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "counterMetric",
+				Type: types.CounterMetricType,
+			},
+			Delta: &delta,
+		}
+		close(inputCh)
+	}()
+	var got []types.Metrics
+	timeout := time.After(200 * time.Millisecond)
+LOOP:
+	for {
+		select {
+		case m, ok := <-outputCh:
+			if !ok {
+				break LOOP
+			}
+			got = append(got, m)
+		case <-timeout:
+			t.Fatal("timeout waiting for metrics")
+		}
+	}
+	assert.Len(t, got, 2)
+	assert.Equal(t, "gaugeMetric", got[0].ID)
+	assert.Equal(t, val, *got[0].Value)
+	assert.Equal(t, "counterMetric", got[1].ID)
+	assert.Equal(t, delta, *got[1].Delta)
+}
+
+func TestReportMetrics_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	inputCh := make(chan types.Metrics)
+	outputCh := reportMetrics(ctx, 10*time.Millisecond, inputCh)
+	cancel()
+	select {
+	case _, ok := <-outputCh:
+		assert.False(t, ok, "output channel should be closed after context cancel")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: output channel not closed after cancel")
+	}
+}
+
+func TestReportMetrics_InputChannelClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inputCh := make(chan types.Metrics)
+	outputCh := reportMetrics(ctx, 10*time.Millisecond, inputCh)
+	close(inputCh)
+	select {
+	case _, ok := <-outputCh:
+		assert.False(t, ok, "output channel should be closed after input channel close")
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: output channel not closed after input channel closed")
+	}
+}
+
+func TestProcessResults_PropagatesErrors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err1 := errors.New("first error")
+	err2 := errors.New("second error")
+	resultCh1 := make(chan result, 1)
+	resultCh2 := make(chan result, 1)
+	resultCh1 <- result{
+		data: types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric1",
+				Type: types.GaugeMetricType,
+			},
+		},
+		err: err1,
+	}
+	resultCh2 <- result{
+		data: types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric2",
+				Type: types.CounterMetricType,
+			},
+		},
+		err: err2,
+	}
+	close(resultCh1)
+	close(resultCh2)
+	errCh := processResults(ctx, []chan result{resultCh1, resultCh2})
+	var received []error
+	for e := range errCh {
+		received = append(received, e)
+	}
+	assert.Len(t, received, 2)
+	assert.Contains(t, received, err1)
+	assert.Contains(t, received, err2)
+}
+
+func TestProcessResults_NoError_NoSend(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resultCh := make(chan result, 2)
+	resultCh <- result{
+		data: types.Metrics{
+			MetricID: types.MetricID{
+				ID:   "metric1",
+				Type: types.GaugeMetricType,
+			},
+		},
+		err: nil,
+	}
+	close(resultCh)
+	errCh := processResults(ctx, []chan result{resultCh})
+	select {
+	case err, ok := <-errCh:
+		if ok {
+			t.Fatalf("unexpected error received: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: errCh was not closed")
+	}
+}
+
+func TestProcessResults_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan result)
+	errCh := processResults(ctx, []chan result{resultCh})
+	cancel()
+	select {
+	case _, ok := <-errCh:
+		if !ok {
+			return
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout: errCh was not closed after context cancel")
+	}
 }

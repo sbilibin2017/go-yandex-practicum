@@ -13,7 +13,6 @@ func resetFlags() {
 }
 
 func TestParseFlags_CommandLineArgs(t *testing.T) {
-
 	resetFlags()
 
 	os.Args = []string{
@@ -25,6 +24,7 @@ func TestParseFlags_CommandLineArgs(t *testing.T) {
 		"-r",
 		"-k", "mykey",
 		"-l", "debug",
+		"-h", "CustomHeader", // добавлено
 	}
 
 	os.Clearenv()
@@ -38,6 +38,7 @@ func TestParseFlags_CommandLineArgs(t *testing.T) {
 	assert.True(t, flagRestore)
 	assert.Equal(t, "mykey", flagKey)
 	assert.Equal(t, "debug", flagLogLevel)
+	assert.Equal(t, "CustomHeader", flagHeader) // проверка
 }
 
 func TestParseFlags_EnvOverrides(t *testing.T) {
@@ -52,6 +53,7 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	os.Setenv("RESTORE", "true")
 	os.Setenv("KEY", "envkey")
 	os.Setenv("LOG_LEVEL", "error")
+	os.Setenv("HEADER", "EnvHeader") // добавлено
 
 	parseFlags()
 
@@ -62,6 +64,7 @@ func TestParseFlags_EnvOverrides(t *testing.T) {
 	assert.True(t, flagRestore)
 	assert.Equal(t, "envkey", flagKey)
 	assert.Equal(t, "error", flagLogLevel)
+	assert.Equal(t, "EnvHeader", flagHeader) // проверка
 }
 
 func TestParseFlags_Defaults(t *testing.T) {
@@ -79,4 +82,5 @@ func TestParseFlags_Defaults(t *testing.T) {
 	assert.False(t, flagRestore)
 	assert.Equal(t, "", flagKey)
 	assert.Equal(t, "info", flagLogLevel)
+	assert.Equal(t, "HashSHA256", flagHeader) // проверка дефолта
 }

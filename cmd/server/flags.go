@@ -13,6 +13,7 @@ var (
 	flagFileStoragePath string
 	flagRestore         bool
 	flagKey             string
+	flagHeader          string
 	flagLogLevel        string
 )
 
@@ -23,6 +24,7 @@ func parseFlags() {
 	flag.StringVar(&flagFileStoragePath, "f", "", "path to store files")
 	flag.BoolVar(&flagRestore, "r", false, "whether to restore data from backup")
 	flag.StringVar(&flagKey, "k", "", "key used for SHA256 hashing")
+	flag.StringVar(&flagHeader, "h", "HashSHA256", "header for hashing")
 	flag.StringVar(&flagLogLevel, "l", "info", "logging level (e.g., info, debug, error)")
 
 	flag.Parse()
@@ -52,4 +54,8 @@ func parseFlags() {
 	if val := os.Getenv("LOG_LEVEL"); val != "" {
 		flagLogLevel = val
 	}
+	if val := os.Getenv("HEADER"); val != "" {
+		flagHeader = val
+	}
+
 }
