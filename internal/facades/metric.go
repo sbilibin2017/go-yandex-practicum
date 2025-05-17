@@ -2,21 +2,24 @@ package facades
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/hash"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 type MetricFacade struct {
 	client *resty.Client
 	key    string
+	header string
 }
 
-func NewMetricFacade(client *resty.Client, flagServerAddress, key string) *MetricFacade {
+func NewMetricFacade(client *resty.Client, flagServerAddress string, key string, header string) *MetricFacade {
 	if !strings.HasPrefix(flagServerAddress, "http://") && !strings.HasPrefix(flagServerAddress, "https://") {
 		flagServerAddress = "http://" + flagServerAddress
 	}
@@ -24,6 +27,7 @@ func NewMetricFacade(client *resty.Client, flagServerAddress, key string) *Metri
 	return &MetricFacade{
 		client: client,
 		key:    key,
+		header: header,
 	}
 }
 
@@ -43,7 +47,7 @@ func (mf *MetricFacade) Updates(ctx context.Context, metrics []types.Metrics) er
 		SetHeader("Accept-Encoding", "gzip").
 		SetBody(bodyBytes)
 
-	setHashHeader(req, bodyBytes, mf.key)
+	setHashHeader(req, bodyBytes, mf.key, mf.header)
 
 	resp, err := req.Post("/updates/")
 	if err != nil {
@@ -55,10 +59,12 @@ func (mf *MetricFacade) Updates(ctx context.Context, metrics []types.Metrics) er
 	return nil
 }
 
-func setHashHeader(req *resty.Request, body []byte, key string) {
+func setHashHeader(req *resty.Request, body []byte, key string, header string) {
 	if key == "" {
 		return
 	}
-	hashValue := hash.HashWithKey(body, key)
-	req.SetHeader(hash.Header, hashValue)
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(body)
+	hashValue := hex.EncodeToString(h.Sum(nil))
+	req.SetHeader(header, hashValue)
 }

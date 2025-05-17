@@ -8,27 +8,36 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
+	"golang.org/x/sync/semaphore"
 )
 
-func run(ctx context.Context, opts *options) error {
-	if err := logger.Initialize(opts.LogLevel); err != nil {
+func run(ctx context.Context) error {
+	if err := logger.Initialize(flagLogLevel); err != nil {
 		return err
 	}
 
 	client := resty.New()
-	metricFacade := facades.NewMetricFacade(client, opts.ServerAddress, opts.Key)
+
+	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagKey, flagHeader)
 
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	go workers.StartMetricAgentWorker(
+	sem := semaphore.NewWeighted(int64(flagNumWorkers))
+
+	worker := workers.NewMetricAgentWorker(
 		ctx,
 		metricFacade,
-		opts.PollInterval,
-		opts.ReportInterval,
-		opts.NumWorkers,
+		sem,
+		flagPollInterval,
+		flagReportInterval,
+		flagNumWorkers,
+		flagBatchSize,
 	)
+
+	runners.RunWorker(ctx, worker)
 
 	return nil
 }

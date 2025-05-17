@@ -1,14 +1,9 @@
 package main
 
-import (
-	"context"
-	"os"
-)
+import "context"
 
 func main() {
-	opts := parseFlags()
-	err := run(context.Background(), opts)
-	if err != nil {
-		os.Exit(1)
-	}
+	parseFlags()
+	err := run(context.Background())
+	exit(err)
 }

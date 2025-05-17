@@ -2,13 +2,14 @@ package middlewares
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
-
-	"github.com/sbilibin2017/go-yandex-practicum/internal/hash"
 )
 
-func HashMiddleware(key string) func(http.Handler) http.Handler {
+func HashMiddleware(key string, header string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if key == "" {
 			return next
@@ -22,10 +23,13 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-			receivedHash := r.Header.Get(hash.Header)
+			receivedHash := r.Header.Get(header)
 			if receivedHash != "" {
-				computedHash := hash.HashWithKey(bodyBytes, key)
-				if !hash.CompareHash(receivedHash, computedHash) {
+				h := hmac.New(sha256.New, []byte(key))
+				h.Write(bodyBytes)
+				computedHash := hex.EncodeToString(h.Sum(nil))
+
+				if !hmac.Equal([]byte(receivedHash), []byte(computedHash)) {
 					http.Error(w, "hash mismatch", http.StatusBadRequest)
 					return
 				}
@@ -38,11 +42,11 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rw, r)
 
-			if key != "" {
-				respHash := hash.HashWithKey(rw.buf.Bytes(), key)
-				w.Header().Set(hash.Header, respHash)
-			}
+			hResp := hmac.New(sha256.New, []byte(key))
+			hResp.Write(rw.buf.Bytes())
+			respHash := hex.EncodeToString(hResp.Sum(nil))
 
+			w.Header().Set(header, respHash)
 			w.Write(rw.buf.Bytes())
 		})
 	}
