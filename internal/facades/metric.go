@@ -2,10 +2,6 @@ package facades
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -14,29 +10,43 @@ import (
 )
 
 type MetricFacade struct {
-	client *resty.Client
-	key    string
-	header string
+	client        *resty.Client
+	marshalerFunc func(v any) ([]byte, error)
+	key           string
+	header        string
+	hashFunc      func(data []byte, key string) string
 }
 
-func NewMetricFacade(client *resty.Client, flagServerAddress string, key string, header string) *MetricFacade {
-	if !strings.HasPrefix(flagServerAddress, "http://") && !strings.HasPrefix(flagServerAddress, "https://") {
-		flagServerAddress = "http://" + flagServerAddress
+func NewMetricFacade(
+	client *resty.Client,
+	marshalerFunc func(v any) ([]byte, error),
+	hashFunc func(data []byte, key string) string,
+	serverAddress string,
+	key string,
+	header string,
+) *MetricFacade {
+	if !strings.HasPrefix(serverAddress, "http://") && !strings.HasPrefix(serverAddress, "https://") {
+		serverAddress = "http://" + serverAddress
 	}
-	client = client.SetBaseURL(flagServerAddress)
+	client = client.SetBaseURL(serverAddress)
 	return &MetricFacade{
-		client: client,
-		key:    key,
-		header: header,
+		client:        client,
+		marshalerFunc: marshalerFunc,
+		key:           key,
+		header:        header,
+		hashFunc:      hashFunc,
 	}
 }
 
-func (mf *MetricFacade) Updates(ctx context.Context, metrics []types.Metrics) error {
+func (mf *MetricFacade) Updates(
+	ctx context.Context,
+	metrics []types.Metrics,
+) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 
-	bodyBytes, err := json.Marshal(metrics)
+	bodyBytes, err := mf.marshalerFunc(metrics)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metrics: %w", err)
 	}
@@ -47,7 +57,7 @@ func (mf *MetricFacade) Updates(ctx context.Context, metrics []types.Metrics) er
 		SetHeader("Accept-Encoding", "gzip").
 		SetBody(bodyBytes)
 
-	setHashHeader(req, bodyBytes, mf.key, mf.header)
+	mf.setHashHeader(req, bodyBytes)
 
 	resp, err := req.Post("/updates/")
 	if err != nil {
@@ -59,12 +69,10 @@ func (mf *MetricFacade) Updates(ctx context.Context, metrics []types.Metrics) er
 	return nil
 }
 
-func setHashHeader(req *resty.Request, body []byte, key string, header string) {
-	if key == "" {
+func (mf *MetricFacade) setHashHeader(req *resty.Request, body []byte) {
+	if mf.key == "" || mf.hashFunc == nil {
 		return
 	}
-	h := hmac.New(sha256.New, []byte(key))
-	h.Write(body)
-	hashValue := hex.EncodeToString(h.Sum(nil))
-	req.SetHeader(header, hashValue)
+	hashValue := mf.hashFunc(body, mf.key)
+	req.SetHeader(mf.header, hashValue)
 }

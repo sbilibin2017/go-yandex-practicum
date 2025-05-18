@@ -7,55 +7,49 @@ import (
 )
 
 var (
-	flagServerAddress   string
-	flagDatabaseDSN     string
-	flagStoreInterval   int
-	flagFileStoragePath string
-	flagRestore         bool
-	flagKey             string
-	flagHeader          string
-	flagLogLevel        string
+	serverAddress   string
+	databaseDSN     string
+	storeInterval   int
+	fileStoragePath string
+	restore         bool
+	key             string
+	header          string
+	logLevel        string
 )
 
 func parseFlags() {
-	flag.StringVar(&flagServerAddress, "a", ":8080", "address and port to run server")
-	flag.StringVar(&flagDatabaseDSN, "d", "", "DSN (Data Source Name) for database connection")
-	flag.IntVar(&flagStoreInterval, "i", 300, "interval (in seconds) to store data")
-	flag.StringVar(&flagFileStoragePath, "f", "", "path to store files")
-	flag.BoolVar(&flagRestore, "r", false, "whether to restore data from backup")
-	flag.StringVar(&flagKey, "k", "", "key used for SHA256 hashing")
-	flag.StringVar(&flagHeader, "h", "HashSHA256", "header for hashing")
-	flag.StringVar(&flagLogLevel, "l", "info", "logging level (e.g., info, debug, error)")
+	flag.StringVar(&serverAddress, "a", ":8080", "address and port to run server")
+	flag.StringVar(&databaseDSN, "d", "", "DSN (Data Source Name) for database connection")
+	flag.IntVar(&storeInterval, "i", 300, "interval (in seconds) to store data")
+	flag.StringVar(&fileStoragePath, "f", "", "path to store files")
+	flag.BoolVar(&restore, "r", false, "whether to restore data from backup")
+	flag.StringVar(&key, "k", "", "key used for SHA256 hashing")
 
 	flag.Parse()
 
-	if val := os.Getenv("ADDRESS"); val != "" {
-		flagServerAddress = val
+	if env := os.Getenv("ADDRESS"); env != "" {
+		serverAddress = env
 	}
-	if val := os.Getenv("DATABASE_DSN"); val != "" {
-		flagDatabaseDSN = val
+	if env := os.Getenv("DATABASE_DSN"); env != "" {
+		databaseDSN = env
 	}
-	if val := os.Getenv("STORE_INTERVAL"); val != "" {
-		if v, err := strconv.Atoi(val); err == nil {
-			flagStoreInterval = v
+	if env := os.Getenv("STORE_INTERVAL"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil {
+			storeInterval = v
 		}
 	}
-	if val := os.Getenv("FILE_STORAGE_PATH"); val != "" {
-		flagFileStoragePath = val
+	if env := os.Getenv("FILE_STORAGE_PATH"); env != "" {
+		fileStoragePath = env
 	}
-	if val := os.Getenv("RESTORE"); val != "" {
-		if v, err := strconv.ParseBool(val); err == nil {
-			flagRestore = v
+	if env := os.Getenv("RESTORE"); env != "" {
+		if v, err := strconv.ParseBool(env); err == nil {
+			restore = v
 		}
 	}
-	if val := os.Getenv("KEY"); val != "" {
-		flagKey = val
-	}
-	if val := os.Getenv("LOG_LEVEL"); val != "" {
-		flagLogLevel = val
-	}
-	if val := os.Getenv("HEADER"); val != "" {
-		flagHeader = val
+	if env := os.Getenv("KEY"); env != "" {
+		key = env
 	}
 
+	header = "HashSHA256"
+	logLevel = "info"
 }

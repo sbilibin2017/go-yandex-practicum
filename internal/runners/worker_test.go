@@ -13,7 +13,6 @@ func TestRunWorker_Success(t *testing.T) {
 	ctx := context.Background()
 
 	worker := func(ctx context.Context) error {
-		// эмуляция короткой работы
 		time.Sleep(10 * time.Millisecond)
 		return nil
 	}

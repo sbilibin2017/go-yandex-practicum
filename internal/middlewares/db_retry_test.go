@@ -2,231 +2,158 @@ package middlewares
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgconn"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestDBRetryMiddlewareStandard_Success(t *testing.T) {
-	calls := 0
+func TestDBRetryMiddleware_Success(t *testing.T) {
+	attempts := []time.Duration{time.Millisecond * 10}
 
-	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK from inner handler"))
+		w.Write([]byte("ok"))
 	})
 
-	handlerWithMiddleware := DBRetryMiddleware(innerHandler)
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool { return false },
+	)
 
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	handlerWithMiddleware.ServeHTTP(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "OK from inner handler", rec.Body.String())
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ok", strings.TrimSpace(w.Body.String()))
 }
 
-func TestDBRetryMiddleware_SuccessFirstTry(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-		return nil
-	}
+func TestDBRetryMiddleware_WithRetrySuccess(t *testing.T) {
+	attempts := []time.Duration{time.Millisecond * 10, time.Millisecond * 10}
+	callCount := 0
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	dbRetryMiddleware(handler)(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, 1, calls)
-	assert.Equal(t, "OK", rec.Body.String())
-}
-
-func TestDBRetryMiddleware_RetryAndFail(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		return newRetriablePGError("08006") // Connection failure (retriable)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	start := time.Now()
-	dbRetryMiddleware(handler)(rec, req)
-	duration := time.Since(start)
-
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.GreaterOrEqual(t, calls, 4) // initial + 3 retries
-	// Проверяем, что время примерно больше или равно сумме задержек
-	assert.GreaterOrEqual(t, duration, 9*time.Second)
-}
-
-func TestDBRetryMiddleware_RetryAndSucceed(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		if calls < 3 {
-			return newRetriablePGError("08001") // Connection exception, retriable
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 2 {
+			panic("temporary error")
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Recovered"))
-		return nil
-	}
+		w.Write([]byte("recovered"))
+	})
 
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return err.Error() == "handler panic occurred"
+		},
+	)
+
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	dbRetryMiddleware(handler)(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "Recovered", rec.Body.String())
-	assert.Equal(t, 3, calls)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "recovered", strings.TrimSpace(w.Body.String()))
+	assert.Equal(t, 2, callCount)
 }
 
 func TestDBRetryMiddleware_NonRetriableError(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		return errors.New("fatal DB error") // Non-retriable
-	}
+	attempts := []time.Duration{time.Millisecond * 10}
 
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		panic("fatal error")
+	})
+
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return false
+		},
+	)
+
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	dbRetryMiddleware(handler)(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "bad request", strings.TrimSpace(w.Body.String()))
 }
 
-func newRetriablePGError(code string) error {
-	return &pgconn.PgError{
-		Code: code,
+func TestDBRetryMiddleware_FailsAfterRetries(t *testing.T) {
+	attempts := []time.Duration{
+		time.Millisecond * 10,
+		time.Millisecond * 10,
+		time.Millisecond * 10,
 	}
-}
+	callCount := 0
 
-func makePgError(code string) error {
-	return &pgconn.PgError{Code: code}
-}
-
-func TestWithRetry_SuccessFirstTry(t *testing.T) {
-	called := 0
-	err := withRetry(context.Background(), []time.Duration{time.Millisecond}, func(ctx context.Context) error {
-		called++
-		return nil
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		http.Error(w, "fail", http.StatusInternalServerError)
+		panic("handler panic occurred")
 	})
-	require.NoError(t, err)
-	assert.Equal(t, 1, called)
+
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return err.Error() == "handler panic occurred"
+		},
+	)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	middleware(handler).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "fail", strings.TrimSpace(w.Body.String()))
+	assert.Equal(t, len(attempts)+1, callCount)
 }
 
-func TestWithRetry_SuccessAfterRetry(t *testing.T) {
-	called := 0
-	err := withRetry(context.Background(), []time.Duration{time.Millisecond, time.Millisecond}, func(ctx context.Context) error {
-		called++
-		if called < 2 {
-			return makePgError("08000") // retriable error code
+func withRetryMock(
+	ctx context.Context,
+	attempts []time.Duration,
+	fn func(ctx context.Context) error,
+	isRetriableErrorFuncs ...func(err error) bool,
+) error {
+	var lastErr error
+
+	for i := 0; i <= len(attempts); i++ {
+		err := fn(ctx)
+		if err == nil {
+			return nil
 		}
-		return nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 2, called)
-}
 
-func TestWithRetry_NonRetriableError(t *testing.T) {
-	called := 0
-	expectedErr := errors.New("non-retriable error")
-	err := withRetry(context.Background(), []time.Duration{time.Millisecond}, func(ctx context.Context) error {
-		called++
-		return expectedErr
-	})
-	assert.ErrorIs(t, err, expectedErr)
-	assert.Equal(t, 1, called)
-}
+		isRetriable := false
+		for _, f := range isRetriableErrorFuncs {
+			if f(err) {
+				isRetriable = true
+				break
+			}
+		}
 
-func TestWithRetry_ExceedsRetries(t *testing.T) {
-	called := 0
-	retriableErr := makePgError("08000")
-	delays := []time.Duration{time.Millisecond, time.Millisecond}
+		if !isRetriable {
+			return err
+		}
 
-	err := withRetry(context.Background(), delays, func(ctx context.Context) error {
-		called++
-		return retriableErr
-	})
-	assert.ErrorIs(t, err, retriableErr)
-	assert.Equal(t, len(delays)+1, called)
-}
+		lastErr = err
 
-func TestWithRetry_ContextCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	called := 0
-	delays := []time.Duration{100 * time.Millisecond, 100 * time.Millisecond}
-
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
-
-	err := withRetry(ctx, delays, func(ctx context.Context) error {
-		called++
-		return makePgError("08000") // retriable error
-	})
-
-	require.Error(t, err)
-	assert.Equal(t, context.Canceled, err)
-	assert.Less(t, called, len(delays)+1)
-}
-
-func TestIsRetriableDBError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "nil error",
-			err:  nil,
-			want: false,
-		},
-		{
-			name: "non-pg error",
-			err:  errors.New("some error"),
-			want: false,
-		},
-		{
-			name: "pg error with code starting 08",
-			err:  &pgconn.PgError{Code: "08003"},
-			want: true,
-		},
-		{
-			name: "pg error with code not starting 08",
-			err:  &pgconn.PgError{Code: "23505"},
-			want: false,
-		},
-		{
-			name: "pg error with short code",
-			err:  &pgconn.PgError{Code: "0"},
-			want: false,
-		},
+		if i < len(attempts) {
+			time.Sleep(attempts[i])
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isRetriableDBError(tt.err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	return lastErr
 }

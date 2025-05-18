@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
+
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,25 +14,29 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/hasher"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/repositories"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/retrier"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/services"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/tx"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
+
 	"go.uber.org/zap"
 )
 
-func run(ctx context.Context) error {
-	if err := logger.Initialize(flagLogLevel); err != nil {
+func run() error {
+	if err := logger.Initialize(logLevel); err != nil {
 		return err
 	}
 
 	var file *os.File
-	if flagFileStoragePath != "" {
+	if fileStoragePath != "" {
 		var err error
-		file, err = os.OpenFile(flagFileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+		file, err = os.OpenFile(fileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
@@ -39,9 +44,9 @@ func run(ctx context.Context) error {
 	}
 
 	var db *sqlx.DB
-	if flagDatabaseDSN != "" {
+	if databaseDSN != "" {
 		var err error
-		db, err = sqlx.Connect("pgx", flagDatabaseDSN)
+		db, err = sqlx.Connect("pgx", databaseDSN)
 		if err != nil {
 			return err
 		}
@@ -57,8 +62,8 @@ func run(ctx context.Context) error {
 	}
 
 	var storeTicker *time.Ticker
-	if flagStoreInterval > 0 {
-		storeTicker = time.NewTicker(time.Duration(flagStoreInterval) * time.Second)
+	if storeInterval > 0 {
+		storeTicker = time.NewTicker(time.Duration(storeInterval) * time.Second)
 		defer storeTicker.Stop()
 	}
 
@@ -79,9 +84,9 @@ func run(ctx context.Context) error {
 		metricSaveDBRepository    *repositories.MetricSaveDBRepository
 	)
 	if db != nil {
-		metricListAllDBRepository = repositories.NewMetricListAllDBRepository(db, middlewares.GetTx)
-		metricGetByIDDBRepository = repositories.NewMetricGetByIDDBRepository(db, middlewares.GetTx)
-		metricSaveDBRepository = repositories.NewMetricSaveDBRepository(db, middlewares.GetTx)
+		metricListAllDBRepository = repositories.NewMetricListAllDBRepository(db, tx.GetTxFromContext)
+		metricGetByIDDBRepository = repositories.NewMetricGetByIDDBRepository(db, tx.GetTxFromContext)
+		metricSaveDBRepository = repositories.NewMetricSaveDBRepository(db, tx.GetTxFromContext)
 	}
 
 	var (
@@ -123,13 +128,22 @@ func run(ctx context.Context) error {
 
 	router.Use(
 		middlewares.LoggingMiddleware,
-		middlewares.HashMiddleware(flagKey, flagHeader),
+		middlewares.HashMiddleware(key, header, hasher.Hash, hasher.Compare),
 		middlewares.GzipMiddleware,
-		middlewares.TxMiddleware(db, middlewares.SetTx),
-		middlewares.DBRetryMiddleware,
+		middlewares.TxMiddleware(db, tx.WithTx),
+		middlewares.DBRetryMiddleware(
+			retrier.WithRetry,
+			[]time.Duration{
+				1 * time.Second,
+				3 * time.Second,
+				5 * time.Second,
+			},
+			retrier.IsRetriableDBError,
+		),
 	)
 
 	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
+	router.Post("/update/{type}/{name}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
 	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdatesService))
 	router.Post("/updates/", handlers.NewMetricUpdatesBodyHandler(metricUpdatesService))
 	router.Get("/value/{type}/{name}", handlers.NewMetricGetPathHandler(metricGetService))
@@ -138,11 +152,11 @@ func run(ctx context.Context) error {
 	router.Get("/ping", handlers.NewDBPingHandler(db))
 
 	server := &http.Server{
-		Addr:    flagServerAddress,
+		Addr:    serverAddress,
 		Handler: router,
 	}
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	if metricListAllFileRepository != nil && metricSaveFileRepository != nil {
@@ -152,8 +166,8 @@ func run(ctx context.Context) error {
 			metricSaveContextRepository,
 			metricListAllFileRepository,
 			metricSaveFileRepository,
-			flagRestore,
-			flagStoreInterval,
+			restore,
+			storeInterval,
 		)
 
 		err := runners.RunWorker(ctx, worker)

@@ -2,14 +2,16 @@ package middlewares
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"io"
 	"net/http"
 )
 
-func HashMiddleware(key string, header string) func(http.Handler) http.Handler {
+func HashMiddleware(
+	key string,
+	header string,
+	hashFunc func(data []byte, key string) string,
+	compareFunc func(hash1 string, hash2 string) bool,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if key == "" {
 			return next
@@ -25,11 +27,9 @@ func HashMiddleware(key string, header string) func(http.Handler) http.Handler {
 
 			receivedHash := r.Header.Get(header)
 			if receivedHash != "" {
-				h := hmac.New(sha256.New, []byte(key))
-				h.Write(bodyBytes)
-				computedHash := hex.EncodeToString(h.Sum(nil))
+				computedHash := hashFunc(bodyBytes, key)
 
-				if !hmac.Equal([]byte(receivedHash), []byte(computedHash)) {
+				if !compareFunc(receivedHash, computedHash) {
 					http.Error(w, "hash mismatch", http.StatusBadRequest)
 					return
 				}
@@ -42,10 +42,7 @@ func HashMiddleware(key string, header string) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rw, r)
 
-			hResp := hmac.New(sha256.New, []byte(key))
-			hResp.Write(rw.buf.Bytes())
-			respHash := hex.EncodeToString(hResp.Sum(nil))
-
+			respHash := hashFunc(rw.buf.Bytes(), key)
 			w.Header().Set(header, respHash)
 			w.Write(rw.buf.Bytes())
 		})

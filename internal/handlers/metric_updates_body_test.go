@@ -19,6 +19,7 @@ func TestMetricUpdatesBodyHandler(t *testing.T) {
 	type testCase struct {
 		name           string
 		requestBody    []types.Metrics
+		rawRequestBody []byte // для невалидного JSON
 		mockSetup      func(svc *MockMetricUpdatesBodyService)
 		expectedStatus int
 		expectedBody   string
@@ -90,6 +91,19 @@ func TestMetricUpdatesBodyHandler(t *testing.T) {
 			expectedBody:   "Metric delta is required for counter",
 		},
 		{
+			name: "missing value in gauge",
+			requestBody: []types.Metrics{{
+				MetricID: types.MetricID{
+					ID:   "temp",
+					Type: types.GaugeMetricType,
+				},
+				// Value отсутствует
+			}},
+			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Metric value is required for gauge",
+		},
+		{
 			name:        "service returns error",
 			requestBody: []types.Metrics{validCounter},
 			mockSetup: func(svc *MockMetricUpdatesBodyService) {
@@ -99,6 +113,13 @@ func TestMetricUpdatesBodyHandler(t *testing.T) {
 			},
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody:   "Metric not updated",
+		},
+		{
+			name:           "invalid JSON body",
+			rawRequestBody: []byte(`{"invalid_json":`),
+			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Invalid JSON body",
 		},
 	}
 
@@ -112,10 +133,16 @@ func TestMetricUpdatesBodyHandler(t *testing.T) {
 
 			handler := NewMetricUpdatesBodyHandler(mockSvc)
 
-			bodyBytes, err := json.Marshal(tc.requestBody)
-			require.NoError(t, err)
+			var reqBody io.Reader
+			if tc.rawRequestBody != nil {
+				reqBody = bytes.NewReader(tc.rawRequestBody)
+			} else {
+				bodyBytes, err := json.Marshal(tc.requestBody)
+				require.NoError(t, err)
+				reqBody = bytes.NewReader(bodyBytes)
+			}
 
-			req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(bodyBytes))
+			req := httptest.NewRequest(http.MethodPost, "/updates", reqBody)
 			req.Header.Set("Content-Type", "application/json")
 
 			rec := httptest.NewRecorder()
@@ -131,6 +158,51 @@ func TestMetricUpdatesBodyHandler(t *testing.T) {
 			assert.Equal(t, tc.expectedBody, string(bytes.TrimSpace(body)))
 		})
 	}
+}
+
+// Тест ошибки кодирования JSON ответа (ошибка Write)
+
+type failingWriter struct{}
+
+func (f *failingWriter) Header() http.Header {
+	return http.Header{}
+}
+
+func (f *failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write error")
+}
+
+func (f *failingWriter) WriteHeader(statusCode int) {}
+
+func TestMetricUpdatesBodyHandler_ResponseEncodeError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := NewMockMetricUpdatesBodyService(ctrl)
+
+	validCounter := types.Metrics{
+		MetricID: types.MetricID{
+			ID:   "requests",
+			Type: types.CounterMetricType,
+		},
+		Delta: int64Ptr(1),
+	}
+
+	mockSvc.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		Return([]types.Metrics{validCounter}, nil)
+
+	handler := NewMetricUpdatesBodyHandler(mockSvc)
+
+	bodyBytes, err := json.Marshal([]types.Metrics{validCounter})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := &failingWriter{}
+
+	handler.ServeHTTP(w, req)
 }
 
 // Helpers

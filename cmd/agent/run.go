@@ -2,42 +2,45 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os/signal"
 	"syscall"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/hasher"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
-	"golang.org/x/sync/semaphore"
 )
 
-func run(ctx context.Context) error {
-	if err := logger.Initialize(flagLogLevel); err != nil {
+func run() error {
+	if err := logger.Initialize(logLevel); err != nil {
 		return err
 	}
 
 	client := resty.New()
 
-	metricFacade := facades.NewMetricFacade(client, flagServerAddress, flagKey, flagHeader)
-
-	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	sem := semaphore.NewWeighted(int64(flagNumWorkers))
-
-	worker := workers.NewMetricAgentWorker(
-		ctx,
-		metricFacade,
-		sem,
-		flagPollInterval,
-		flagReportInterval,
-		flagNumWorkers,
-		flagBatchSize,
+	metricFacade := facades.NewMetricFacade(
+		client,
+		json.Marshal,
+		hasher.Hash,
+		serverAddress,
+		key,
+		header,
 	)
 
-	runners.RunWorker(ctx, worker)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	return nil
+	worker := workers.NewMetricAgentWorker(
+		metricFacade,
+		pollInterval,
+		reportInterval,
+		rateLimit,
+		batchSize,
+	)
+
+	return runners.RunWorker(ctx, worker)
+
 }
