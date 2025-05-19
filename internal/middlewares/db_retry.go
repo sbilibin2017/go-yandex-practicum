@@ -1,69 +1,87 @@
 package middlewares
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgconn"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"go.uber.org/zap"
 )
 
-type HandlerWithContext func(w http.ResponseWriter, r *http.Request) error
+func DBRetryMiddleware(
+	withRetry func(
+		ctx context.Context,
+		attempts []time.Duration,
+		fn func(ctx context.Context) error,
+		isRetriableErrorFuncs ...func(err error) bool,
+	) error,
+	attempts []time.Duration,
+	isRetriableErrorFuncs ...func(err error) bool,
+) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
 
-func DBRetryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerWithCtx := func(w http.ResponseWriter, r *http.Request) error {
-			next.ServeHTTP(w, r)
-			return nil
-		}
-		dbRetryMiddleware(handlerWithCtx).ServeHTTP(w, r)
-	})
-}
+			var lastBuf bytes.Buffer
+			var lastStatus int
 
-func dbRetryMiddleware(next HandlerWithContext) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		delays := []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
-		var err error
+			err := withRetry(ctx, attempts, func(ctx context.Context) error {
+				buf := &bytes.Buffer{}
+				rw := &responseBufferWriter{ResponseWriter: w, buf: buf}
 
-		ctx := r.Context()
+				errCh := make(chan error, 1)
 
-		for attempt := 0; attempt <= len(delays); attempt++ {
-			err = next(w, r.WithContext(ctx))
-			if err == nil || !isRetriableDBError(err) {
-				break
-			}
+				go func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							errCh <- errors.New("handler panic occurred")
+						}
+					}()
 
-			if attempt < len(delays) {
-				logger.Log.Warn("Retriable DB error, retrying handler",
-					zap.Int("attempt", attempt+1),
-					zap.Duration("next_delay", delays[attempt]),
-					zap.Error(err),
-				)
-				select {
-				case <-time.After(delays[attempt]):
-				case <-ctx.Done():
-					http.Error(w, http.StatusText(http.StatusRequestTimeout), http.StatusRequestTimeout)
-					return
+					next.ServeHTTP(rw, r.WithContext(ctx))
+					errCh <- nil
+				}()
+
+				err := <-errCh
+
+				lastBuf = *bytes.NewBuffer(buf.Bytes())
+				if rw.statusCode != 0 {
+					lastStatus = rw.statusCode
+				} else {
+					lastStatus = http.StatusOK
 				}
-			}
-		}
 
-		if err != nil {
-			logger.Log.Error("Handler failed after retries", zap.Error(err))
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
+				return err
+			}, isRetriableErrorFuncs...)
+
+			if err != nil {
+				logger.Log.Error("Handler failed after retries", zap.Error(err))
+				w.WriteHeader(lastStatus)
+				_, _ = w.Write(lastBuf.Bytes())
+				return
+			}
+
+			w.WriteHeader(lastStatus)
+			_, _ = w.Write(lastBuf.Bytes())
+		})
 	}
 }
 
-func isRetriableDBError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && len(pgErr.Code) >= 2 && pgErr.Code[:2] == "08" {
-		return true
-	}
-	return false
+type responseBufferWriter struct {
+	http.ResponseWriter
+	buf         *bytes.Buffer
+	statusCode  int
+	wroteHeader bool
+}
+
+func (w *responseBufferWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+	w.wroteHeader = true
+}
+
+func (w *responseBufferWriter) Write(data []byte) (int, error) {
+	return w.buf.Write(data)
 }

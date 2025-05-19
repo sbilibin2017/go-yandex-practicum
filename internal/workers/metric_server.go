@@ -9,7 +9,11 @@ import (
 	"go.uber.org/zap"
 )
 
-type MetricListAllMemoryRepository interface {
+type MetricSaveRepository interface {
+	Save(ctx context.Context, metric types.Metrics) error
+}
+
+type MetricListAllRepository interface {
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
@@ -21,47 +25,67 @@ type MetricListAllFileRepository interface {
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
-type MetricSaveMemoryRepository interface {
-	Save(ctx context.Context, metric types.Metrics) error
+func NewMetricServerWorker(
+	ctx context.Context,
+	memoryListAll MetricListAllRepository,
+	memorySave MetricSaveRepository,
+	fileListAll MetricListAllFileRepository,
+	fileSave MetricSaveFileRepository,
+	restore bool,
+	storeInterval int,
+) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		return startMetricServerWorker(
+			ctx,
+			memoryListAll,
+			memorySave,
+			fileListAll,
+			fileSave,
+			restore,
+			storeInterval,
+		)
+	}
 }
 
-func StartMetricServerWorker(
+func startMetricServerWorker(
 	ctx context.Context,
-	MetricListAllMemoryRepository MetricListAllMemoryRepository,
-	MetricSaveMemoryRepository MetricSaveMemoryRepository,
-	MetricListAllFileRepository MetricListAllFileRepository,
-	MetricSaveFileRepository MetricSaveFileRepository,
-	storeTicker *time.Ticker,
+	memoryListAll MetricListAllRepository,
+	memorySave MetricSaveRepository,
+	fileListAll MetricListAllFileRepository,
+	fileSave MetricSaveFileRepository,
 	restore bool,
+	storeInterval int,
 ) error {
 	if restore {
-		if err := loadMetricsFromFile(ctx, MetricListAllFileRepository, MetricSaveMemoryRepository); err != nil {
+		if err := loadMetricsFromFile(ctx, fileListAll, memorySave); err != nil {
 			logger.Log.Error("Failed to restore metrics", zap.Error(err))
+			return err
 		}
 	}
 
-	if storeTicker == nil {
+	if storeInterval == 0 {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 
-		if err := saveMetricsToFile(shutdownCtx, MetricListAllMemoryRepository, MetricSaveFileRepository); err != nil {
+		if err := saveMetricsToFile(shutdownCtx, memoryListAll, fileSave); err != nil {
 			logger.Log.Error("Error saving metrics before shutdown", zap.Error(err))
 			return err
 		}
 		return nil
 	}
 
+	storeTicker := time.NewTicker(time.Duration(storeInterval) * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			return saveMetricsToFile(shutdownCtx, MetricListAllMemoryRepository, MetricSaveFileRepository)
-
+			return saveMetricsToFile(shutdownCtx, memoryListAll, fileSave)
 		case <-storeTicker.C:
-			if err := saveMetricsToFile(ctx, MetricListAllMemoryRepository, MetricSaveFileRepository); err != nil {
-				logger.Log.Error("Periodic save failed", zap.Error(err))
+			err := saveMetricsToFile(ctx, memoryListAll, fileSave)
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -69,16 +93,16 @@ func StartMetricServerWorker(
 
 func saveMetricsToFile(
 	ctx context.Context,
-	MetricListAllMemoryRepository MetricListAllMemoryRepository,
-	MetricSaveFileRepository MetricSaveFileRepository,
+	metricListAllMemoryRepository MetricListAllRepository,
+	metricSaveFileRepository MetricSaveFileRepository,
 ) error {
-	metrics, err := MetricListAllMemoryRepository.ListAll(ctx)
+	metrics, err := metricListAllMemoryRepository.ListAll(ctx)
 	if err != nil {
 		logger.Log.Error("Error fetching metrics from memory", zap.Error(err))
 		return err
 	}
 	for _, metric := range metrics {
-		if err := MetricSaveFileRepository.Save(ctx, metric); err != nil {
+		if err := metricSaveFileRepository.Save(ctx, metric); err != nil {
 			logger.Log.Error("Error saving metric to file", zap.Error(err))
 			return err
 		}
@@ -88,16 +112,16 @@ func saveMetricsToFile(
 
 func loadMetricsFromFile(
 	ctx context.Context,
-	MetricListAllFileRepository MetricListAllFileRepository,
-	MetricSaveMemoryRepository MetricSaveMemoryRepository,
+	metricListAllFileRepository MetricListAllFileRepository,
+	metricSaveMemoryRepository MetricSaveRepository,
 ) error {
-	metrics, err := MetricListAllFileRepository.ListAll(ctx)
+	metrics, err := metricListAllFileRepository.ListAll(ctx)
 	if err != nil {
 		logger.Log.Error("Error fetching metrics from file", zap.Error(err))
 		return err
 	}
 	for _, metric := range metrics {
-		if err := MetricSaveMemoryRepository.Save(ctx, metric); err != nil {
+		if err := metricSaveMemoryRepository.Save(ctx, metric); err != nil {
 			logger.Log.Error("Error saving metric to memory", zap.Error(err))
 			return err
 		}

@@ -1,116 +1,159 @@
 package middlewares
 
 import (
-	"errors"
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgconn"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestDBRetryMiddlewareStandard_Success(t *testing.T) {
-	calls := 0
+func TestDBRetryMiddleware_Success(t *testing.T) {
+	attempts := []time.Duration{time.Millisecond * 10}
 
-	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK from inner handler"))
+		w.Write([]byte("ok"))
 	})
 
-	handlerWithMiddleware := DBRetryMiddleware(innerHandler)
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool { return false },
+	)
 
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	handlerWithMiddleware.ServeHTTP(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "OK from inner handler", rec.Body.String())
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "ok", strings.TrimSpace(w.Body.String()))
 }
 
-func TestDBRetryMiddleware_SuccessFirstTry(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("OK"))
-		return nil
-	}
+func TestDBRetryMiddleware_WithRetrySuccess(t *testing.T) {
+	attempts := []time.Duration{time.Millisecond * 10, time.Millisecond * 10}
+	callCount := 0
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	dbRetryMiddleware(handler)(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, 1, calls)
-	assert.Equal(t, "OK", rec.Body.String())
-}
-
-func TestDBRetryMiddleware_RetryAndFail(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		return newRetriablePGError("08006") // Connection failure (retriable)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-
-	start := time.Now()
-	dbRetryMiddleware(handler)(rec, req)
-	duration := time.Since(start)
-
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.GreaterOrEqual(t, calls, 4) // initial + 3 retries
-	// Проверяем, что время примерно больше или равно сумме задержек
-	assert.GreaterOrEqual(t, duration, 9*time.Second)
-}
-
-func TestDBRetryMiddleware_RetryAndSucceed(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		if calls < 3 {
-			return newRetriablePGError("08001") // Connection exception, retriable
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount < 2 {
+			panic("temporary error")
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("Recovered"))
-		return nil
-	}
+		w.Write([]byte("recovered"))
+	})
 
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return err.Error() == "handler panic occurred"
+		},
+	)
+
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	dbRetryMiddleware(handler)(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "Recovered", rec.Body.String())
-	assert.Equal(t, 3, calls)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "recovered", strings.TrimSpace(w.Body.String()))
+	assert.Equal(t, 2, callCount)
 }
 
 func TestDBRetryMiddleware_NonRetriableError(t *testing.T) {
-	calls := 0
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		calls++
-		return errors.New("fatal DB error") // Non-retriable
-	}
+	attempts := []time.Duration{time.Millisecond * 10}
 
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		panic("fatal error")
+	})
+
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return false
+		},
+	)
+
+	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
 
-	dbRetryMiddleware(handler)(rec, req)
+	middleware(handler).ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Equal(t, 1, calls)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "bad request", strings.TrimSpace(w.Body.String()))
 }
 
-func newRetriablePGError(code string) error {
-	return &pgconn.PgError{
-		Code: code,
+func TestDBRetryMiddleware_FailsAfterRetries(t *testing.T) {
+	attempts := []time.Duration{
+		time.Millisecond * 10,
+		time.Millisecond * 10,
+		time.Millisecond * 10,
 	}
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		http.Error(w, "fail", http.StatusInternalServerError)
+		panic("handler panic occurred")
+	})
+
+	middleware := DBRetryMiddleware(
+		withRetryMock,
+		attempts,
+		func(err error) bool {
+			return err.Error() == "handler panic occurred"
+		},
+	)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	middleware(handler).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "fail", strings.TrimSpace(w.Body.String()))
+	assert.Equal(t, len(attempts)+1, callCount)
+}
+
+func withRetryMock(
+	ctx context.Context,
+	attempts []time.Duration,
+	fn func(ctx context.Context) error,
+	isRetriableErrorFuncs ...func(err error) bool,
+) error {
+	var lastErr error
+
+	for i := 0; i <= len(attempts); i++ {
+		err := fn(ctx)
+		if err == nil {
+			return nil
+		}
+
+		isRetriable := false
+		for _, f := range isRetriableErrorFuncs {
+			if f(err) {
+				isRetriable = true
+				break
+			}
+		}
+
+		if !isRetriable {
+			return err
+		}
+
+		lastErr = err
+
+		if i < len(attempts) {
+			time.Sleep(attempts[i])
+		}
+	}
+
+	return lastErr
 }

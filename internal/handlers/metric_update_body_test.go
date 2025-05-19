@@ -163,3 +163,37 @@ func TestNewMetricUpdateBodyHandler(t *testing.T) {
 		})
 	}
 }
+
+type writerThatFails struct{}
+
+func (w *writerThatFails) Header() http.Header {
+	return http.Header{}
+}
+
+func (w *writerThatFails) Write([]byte) (int, error) {
+	return 0, errors.New("write error")
+}
+
+func (w *writerThatFails) WriteHeader(statusCode int) {}
+
+func TestMetricUpdateBodyHandler_EncodingError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockSvc := NewMockMetricUpdateBodyService(ctrl)
+	counterDelta := int64(42)
+	reqMetric := types.Metrics{
+		MetricID: types.MetricID{ID: "cpu", Type: types.CounterMetricType},
+		Delta:    &counterDelta,
+	}
+	mockSvc.EXPECT().
+		Updates(gomock.Any(), []types.Metrics{reqMetric}).
+		Return([]types.Metrics{reqMetric}, nil)
+
+	handler := NewMetricUpdateBodyHandler(mockSvc)
+	bodyBytes, err := json.Marshal(reqMetric)
+	assert.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(bodyBytes))
+	w := &writerThatFails{}
+	handler(w, req)
+}

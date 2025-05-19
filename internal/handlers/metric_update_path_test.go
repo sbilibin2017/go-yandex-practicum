@@ -93,6 +93,20 @@ func TestMetricUpdatePathHandler(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 			expectedBody:   "Metric not updated\n",
 		},
+		{
+			name:           "missing metric name",
+			urlPath:        "/update/counter//100", // пустое имя
+			mockService:    nil,
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "Metric name is required\n",
+		},
+		{
+			name:           "missing metric value",
+			urlPath:        "/update/counter/ops", // пустое значение
+			mockService:    nil,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "Metric value is required\n",
+		},
 	}
 
 	for _, tc := range tests {
@@ -107,6 +121,7 @@ func TestMetricUpdatePathHandler(t *testing.T) {
 
 			router := chi.NewRouter()
 			router.Post("/update/{type}/{name}/{value}", NewMetricUpdatePathHandler(mockService))
+			router.Post("/update/{type}/{name}", NewMetricUpdatePathHandler(mockService))
 
 			req := httptest.NewRequest(http.MethodPost, tc.urlPath, nil)
 			w := httptest.NewRecorder()

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-
-	"github.com/sbilibin2017/go-yandex-practicum/internal/hash"
 )
 
-func HashMiddleware(key string) func(http.Handler) http.Handler {
+func HashMiddleware(
+	key string,
+	header string,
+	hashFunc func(data []byte, key string) string,
+	compareFunc func(hash1 string, hash2 string) bool,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		if key == "" {
 			return next
@@ -22,10 +25,11 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-			receivedHash := r.Header.Get(hash.Header)
+			receivedHash := r.Header.Get(header)
 			if receivedHash != "" {
-				computedHash := hash.HashWithKey(bodyBytes, key)
-				if !hash.CompareHash(receivedHash, computedHash) {
+				computedHash := hashFunc(bodyBytes, key)
+
+				if !compareFunc(receivedHash, computedHash) {
 					http.Error(w, "hash mismatch", http.StatusBadRequest)
 					return
 				}
@@ -38,11 +42,8 @@ func HashMiddleware(key string) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rw, r)
 
-			if key != "" {
-				respHash := hash.HashWithKey(rw.buf.Bytes(), key)
-				w.Header().Set(hash.Header, respHash)
-			}
-
+			respHash := hashFunc(rw.buf.Bytes(), key)
+			w.Header().Set(header, respHash)
 			w.Write(rw.buf.Bytes())
 		})
 	}

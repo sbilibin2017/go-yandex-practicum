@@ -13,14 +13,11 @@ import (
 func TestUpdate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
-
 	ptrInt64 := func(v int64) *int64 {
 		return &v
 	}
-
 	mockGetByIDRepo := NewMockMetricUpdateGetByIDRepository(ctrl)
 	mockSaveRepo := NewMockMetricUpdateSaveRepository(ctrl)
-
 	service := NewMetricUpdatesService(mockGetByIDRepo, mockSaveRepo)
 
 	tests := []struct {
@@ -144,7 +141,6 @@ func TestAggregateMetrics_CounterAggregation(t *testing.T) {
 	id := "requests_total"
 	d1 := int64(10)
 	d2 := int64(20)
-
 	metrics := []types.Metrics{
 		{
 			MetricID: types.MetricID{ID: id, Type: types.CounterMetricType},
@@ -155,10 +151,8 @@ func TestAggregateMetrics_CounterAggregation(t *testing.T) {
 			Delta:    &d2,
 		},
 	}
-
 	result, err := aggregateMetrics(metrics)
 	require.NoError(t, err)
-
 	assert.Len(t, result, 1)
 	assert.Equal(t, id, result[0].ID)
 	assert.NotNil(t, result[0].Delta)
@@ -168,17 +162,14 @@ func TestAggregateMetrics_CounterAggregation(t *testing.T) {
 func TestAggregateMetrics_GaugePreserved(t *testing.T) {
 	id := "memory_usage"
 	v := 42.5
-
 	metrics := []types.Metrics{
 		{
 			MetricID: types.MetricID{ID: id, Type: types.GaugeMetricType},
 			Value:    &v,
 		},
 	}
-
 	result, err := aggregateMetrics(metrics)
 	require.NoError(t, err)
-
 	assert.Len(t, result, 1)
 	assert.Equal(t, id, result[0].ID)
 	assert.NotNil(t, result[0].Value)
@@ -190,7 +181,6 @@ func TestAggregateMetrics_MultipleMetricIDs(t *testing.T) {
 	id2 := "gauge1"
 	delta := int64(5)
 	value := 3.14
-
 	metrics := []types.Metrics{
 		{
 			MetricID: types.MetricID{ID: id1, Type: types.CounterMetricType},
@@ -201,17 +191,14 @@ func TestAggregateMetrics_MultipleMetricIDs(t *testing.T) {
 			Value:    &value,
 		},
 	}
-
 	result, err := aggregateMetrics(metrics)
 	require.NoError(t, err)
-
 	assert.Len(t, result, 2)
 }
 
 func TestAggregateMetrics_NilValuesIgnored(t *testing.T) {
 	id := "test_counter"
 	delta := int64(10)
-
 	metrics := []types.Metrics{
 		{
 			MetricID: types.MetricID{ID: id, Type: types.CounterMetricType},
@@ -222,10 +209,8 @@ func TestAggregateMetrics_NilValuesIgnored(t *testing.T) {
 			Delta:    nil,
 		},
 	}
-
 	result, err := aggregateMetrics(metrics)
 	require.NoError(t, err)
-
 	assert.Len(t, result, 1)
 	assert.Equal(t, int64(10), *result[0].Delta)
 }
@@ -247,9 +232,7 @@ func TestMetricUpdateCounter(t *testing.T) {
 		},
 		Delta: &newDelta,
 	}
-
 	result := metricUpdateCounter(oldMetric, newMetric)
-
 	expectedDelta := int64(30)
 	assert.Equal(t, expectedDelta, *result.Delta)
 }
@@ -271,8 +254,27 @@ func TestMetricUpdateGauge(t *testing.T) {
 		},
 		Value: &newValue,
 	}
-
 	result := metricUpdateGauge(oldMetric, newMetric)
-
 	assert.Equal(t, newValue, *result.Value)
+}
+
+func TestAggregateMetrics_GaugeOverwrite(t *testing.T) {
+	id := "cpu_usage"
+	first := 10.0
+	second := 99.9
+	metrics := []types.Metrics{
+		{
+			MetricID: types.MetricID{ID: id, Type: types.GaugeMetricType},
+			Value:    &first,
+		},
+		{
+			MetricID: types.MetricID{ID: id, Type: types.GaugeMetricType},
+			Value:    &second,
+		},
+	}
+	result, err := aggregateMetrics(metrics)
+	require.NoError(t, err)
+	assert.Len(t, result, 1)
+	assert.NotNil(t, result[0].Value)
+	assert.Equal(t, second, *result[0].Value)
 }

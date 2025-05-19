@@ -25,10 +25,19 @@ func NewMetricListAllDBRepository(
 func (r *MetricListAllDBRepository) ListAll(
 	ctx context.Context,
 ) ([]types.Metrics, error) {
-	metrics, err := namedQueryContext[types.Metrics](ctx, r.db, r.txProvider, metricListAllQuery, nil)
+	executor := getExecutor(ctx, r.db, r.txProvider)
+
+	stmt, err := executor.PrepareNamedContext(ctx, metricListAllQuery)
 	if err != nil {
 		return nil, err
 	}
+	defer stmt.Close()
+
+	var metrics []types.Metrics
+	if err := stmt.SelectContext(ctx, &metrics, map[string]interface{}{}); err != nil {
+		return nil, err
+	}
+
 	return metrics, nil
 }
 

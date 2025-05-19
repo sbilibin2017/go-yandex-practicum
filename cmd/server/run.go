@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
+
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,25 +14,29 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/hasher"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/repositories"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/retrier"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/services"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/tx"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
+
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
-func run(ctx context.Context, opts *options) error {
-	if err := logger.Initialize(opts.LogLevel); err != nil {
+func run() error {
+	if err := logger.Initialize(logLevel); err != nil {
 		return err
 	}
 
 	var file *os.File
-	if opts.FileStoragePath != "" {
+	if fileStoragePath != "" {
 		var err error
-		file, err = os.OpenFile(opts.FileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+		file, err = os.OpenFile(fileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
@@ -39,9 +44,9 @@ func run(ctx context.Context, opts *options) error {
 	}
 
 	var db *sqlx.DB
-	if opts.DatabaseDSN != "" {
+	if databaseDSN != "" {
 		var err error
-		db, err = sqlx.Connect("pgx", opts.DatabaseDSN)
+		db, err = sqlx.Connect("pgx", databaseDSN)
 		if err != nil {
 			return err
 		}
@@ -57,8 +62,8 @@ func run(ctx context.Context, opts *options) error {
 	}
 
 	var storeTicker *time.Ticker
-	if opts.StoreInterval > 0 {
-		storeTicker = time.NewTicker(time.Duration(opts.StoreInterval) * time.Second)
+	if storeInterval > 0 {
+		storeTicker = time.NewTicker(time.Duration(storeInterval) * time.Second)
 		defer storeTicker.Stop()
 	}
 
@@ -79,9 +84,9 @@ func run(ctx context.Context, opts *options) error {
 		metricSaveDBRepository    *repositories.MetricSaveDBRepository
 	)
 	if db != nil {
-		metricListAllDBRepository = repositories.NewMetricListAllDBRepository(db, middlewares.GetTx)
-		metricGetByIDDBRepository = repositories.NewMetricGetByIDDBRepository(db, middlewares.GetTx)
-		metricSaveDBRepository = repositories.NewMetricSaveDBRepository(db, middlewares.GetTx)
+		metricListAllDBRepository = repositories.NewMetricListAllDBRepository(db, tx.GetTxFromContext)
+		metricGetByIDDBRepository = repositories.NewMetricGetByIDDBRepository(db, tx.GetTxFromContext)
+		metricSaveDBRepository = repositories.NewMetricSaveDBRepository(db, tx.GetTxFromContext)
 	}
 
 	var (
@@ -123,13 +128,22 @@ func run(ctx context.Context, opts *options) error {
 
 	router.Use(
 		middlewares.LoggingMiddleware,
-		middlewares.HashMiddleware(opts.Key),
+		middlewares.HashMiddleware(key, header, hasher.Hash, hasher.Compare),
 		middlewares.GzipMiddleware,
-		middlewares.TxMiddleware(db),
-		middlewares.DBRetryMiddleware,
+		middlewares.TxMiddleware(db, tx.WithTx),
+		middlewares.DBRetryMiddleware(
+			retrier.WithRetry,
+			[]time.Duration{
+				1 * time.Second,
+				3 * time.Second,
+				5 * time.Second,
+			},
+			retrier.IsRetriableDBError,
+		),
 	)
 
 	router.Post("/update/{type}/{name}/{value}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
+	router.Post("/update/{type}/{name}", handlers.NewMetricUpdatePathHandler(metricUpdatesService))
 	router.Post("/update/", handlers.NewMetricUpdateBodyHandler(metricUpdatesService))
 	router.Post("/updates/", handlers.NewMetricUpdatesBodyHandler(metricUpdatesService))
 	router.Get("/value/{type}/{name}", handlers.NewMetricGetPathHandler(metricGetService))
@@ -138,68 +152,34 @@ func run(ctx context.Context, opts *options) error {
 	router.Get("/ping", handlers.NewDBPingHandler(db))
 
 	server := &http.Server{
-		Addr:    opts.ServerAddress,
+		Addr:    serverAddress,
 		Handler: router,
 	}
 
-	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	grp, ctx := errgroup.WithContext(ctx)
-
 	if metricListAllFileRepository != nil && metricSaveFileRepository != nil {
-		grp.Go(func() error {
-			return workers.StartMetricServerWorker(
-				ctx,
-				metricListAllContextRepository,
-				metricSaveContextRepository,
-				metricListAllFileRepository,
-				metricSaveFileRepository,
-				storeTicker,
-				opts.Restore,
-			)
-		})
-	}
+		worker := workers.NewMetricServerWorker(
+			ctx,
+			metricListAllContextRepository,
+			metricSaveContextRepository,
+			metricListAllFileRepository,
+			metricSaveFileRepository,
+			restore,
+			storeInterval,
+		)
 
-	grp.Go(func() error {
-		logger.Log.Info("Starting HTTP server", zap.String("addr", server.Addr))
-
-		errCh := make(chan error, 1)
-		go func() {
-			err := server.ListenAndServe()
-			if err != nil && err != http.ErrServerClosed {
-				logger.Log.Error("Server ListenAndServe error", zap.Error(err))
-				errCh <- err
-			} else {
-				logger.Log.Info("Server stopped listening", zap.Error(err))
-			}
-			close(errCh)
-		}()
-
-		select {
-		case <-ctx.Done():
-			logger.Log.Info("Context done, shutting down server")
-
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-
-			if err := server.Shutdown(shutdownCtx); err != nil {
-				logger.Log.Error("Error during server shutdown", zap.Error(err))
-				return err
-			}
-			logger.Log.Info("Server shutdown complete")
-			return nil
-
-		case err := <-errCh:
-			if err != nil {
-				logger.Log.Error("Server error received from errCh", zap.Error(err))
-			} else {
-				logger.Log.Info("Server exited without error")
-			}
+		err := runners.RunWorker(ctx, worker)
+		if err != nil {
 			return err
 		}
-	})
+	}
 
-	err := grp.Wait()
-	return err
+	err := runners.RunServer(ctx, server)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

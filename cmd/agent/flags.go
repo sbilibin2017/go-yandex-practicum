@@ -6,90 +6,49 @@ import (
 	"strconv"
 )
 
-const (
-	flagAddress        = "a"
-	flagPollInterval   = "p"
-	flagReportInterval = "r"
-	flagLogLevel       = "ll"
-	flagKey            = "k"
-	flagRateLimit      = "l"
-	flagNumWorkers     = "w"
-
-	envAddress        = "ADDRESS"
-	envPollInterval   = "POLL_INTERVAL"
-	envReportInterval = "REPORT_INTERVAL"
-	envLogLevel       = "LOG_LEVEL"
-	envKey            = "KEY"
-	envRateLimit      = "RATE_LIMIT"
-	envNumWorkers     = "NUM_WORKERS"
-
-	defaultServerAddress  = "http://localhost:8080"
-	defaultPollInterval   = 2
-	defaultReportInterval = 10
-	defaultLogLevel       = "info"
-	defaultNumWorkers     = 5
-
-	flagAddressUsage        = "Metrics server address"
-	flagPollIntervalUsage   = "Poll interval in seconds"
-	flagReportIntervalUsage = "Report interval in seconds"
-	flagLogLevelUsage       = "Log level (e.g., debug, info, warn, error)"
-	flagKeyUsage            = "Key for HMAC SHA256 hash"
-	flagRateLimitUsage      = "Max number of concurrent outgoing requests"
-	flagNumWorkersUsage     = "Number of workers"
+var (
+	serverAddress  string
+	pollInterval   int
+	reportInterval int
+	key            string
+	rateLimit      int
+	batchSize      int
+	logLevel       string
+	header         string
 )
 
-type options struct {
-	ServerAddress  string
-	PollInterval   int
-	ReportInterval int
-	LogLevel       string
-	Key            string
-	RateLimit      int
-	NumWorkers     int
-}
-
-var opts options
-
-func parseFlags() *options {
-	flag.StringVar(&opts.ServerAddress, flagAddress, defaultServerAddress, flagAddressUsage)
-	flag.IntVar(&opts.PollInterval, flagPollInterval, defaultPollInterval, flagPollIntervalUsage)
-	flag.IntVar(&opts.ReportInterval, flagReportInterval, defaultReportInterval, flagReportIntervalUsage)
-	flag.StringVar(&opts.LogLevel, flagLogLevel, defaultLogLevel, flagLogLevelUsage)
-	flag.StringVar(&opts.Key, flagKey, "", flagKeyUsage)
-	flag.IntVar(&opts.RateLimit, flagRateLimit, 0, flagRateLimitUsage)
-	flag.IntVar(&opts.NumWorkers, flagNumWorkers, defaultNumWorkers, flagNumWorkersUsage)
+func parseFlags() {
+	flag.StringVar(&serverAddress, "a", "http://localhost:8080", "Metrics server address")
+	flag.IntVar(&pollInterval, "p", 2, "Poll interval in seconds")
+	flag.IntVar(&reportInterval, "r", 10, "Report interval in seconds")
+	flag.StringVar(&key, "k", "", "Key for HMAC SHA256 hash")
+	flag.IntVar(&rateLimit, "l", 0, "Max number of concurrent outgoing requests")
 
 	flag.Parse()
 
-	if envServerAddress := os.Getenv(envAddress); envServerAddress != "" {
-		opts.ServerAddress = envServerAddress
+	if env := os.Getenv("ADDRESS"); env != "" {
+		serverAddress = env
 	}
-	if envPollInterval := os.Getenv(envPollInterval); envPollInterval != "" {
-		if val, err := strconv.Atoi(envPollInterval); err == nil {
-			opts.PollInterval = val
+	if env := os.Getenv("POLL_INTERVAL"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil {
+			pollInterval = v
 		}
 	}
-	if envReportInterval := os.Getenv(envReportInterval); envReportInterval != "" {
-		if val, err := strconv.Atoi(envReportInterval); err == nil {
-			opts.ReportInterval = val
+	if env := os.Getenv("REPORT_INTERVAL"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil {
+			reportInterval = v
 		}
 	}
-	if envLogLevel := os.Getenv(envLogLevel); envLogLevel != "" {
-		opts.LogLevel = envLogLevel
+	if env := os.Getenv("KEY"); env != "" {
+		key = env
 	}
-	if envKey := os.Getenv(envKey); envKey != "" {
-		opts.Key = envKey
-	}
-	if envRateLimit := os.Getenv(envRateLimit); envRateLimit != "" {
-		if val, err := strconv.Atoi(envRateLimit); err == nil {
-			opts.RateLimit = val
-		}
-	}
-	if envNumWorkers := os.Getenv(envNumWorkers); envNumWorkers != "" {
-		if val, err := strconv.Atoi(envNumWorkers); err == nil {
-			opts.NumWorkers = val
+	if env := os.Getenv("RATE_LIMIT"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil {
+			rateLimit = v
 		}
 	}
 
-	return &opts
+	logLevel = "info"
+	header = "HashSHA256"
+	batchSize = 100
 }

@@ -31,7 +31,17 @@ func (r *MetricSaveDBRepository) Save(
 		"delta": metric.Delta,
 		"value": metric.Value,
 	}
-	return namedExecContext(ctx, r.db, r.txProvider, metricSaveQuery, args)
+
+	executor := getExecutor(ctx, r.db, r.txProvider)
+
+	stmt, err := executor.PrepareNamedContext(ctx, metricSaveQuery)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	_, err = stmt.ExecContext(ctx, args)
+	return err
 }
 
 const metricSaveQuery = `

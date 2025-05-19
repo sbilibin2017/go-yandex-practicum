@@ -8,17 +8,17 @@ import (
 )
 
 type MetricGetByIDDBRepository struct {
-	db         *sqlx.DB
-	txProvider func(ctx context.Context) *sqlx.Tx
+	db       *sqlx.DB
+	txGetter func(ctx context.Context) *sqlx.Tx
 }
 
 func NewMetricGetByIDDBRepository(
 	db *sqlx.DB,
-	txProvider func(ctx context.Context) *sqlx.Tx,
+	txGetter func(ctx context.Context) *sqlx.Tx,
 ) *MetricGetByIDDBRepository {
 	return &MetricGetByIDDBRepository{
-		db:         db,
-		txProvider: txProvider,
+		db:       db,
+		txGetter: txGetter,
 	}
 }
 
@@ -30,11 +30,22 @@ func (r *MetricGetByIDDBRepository) GetByID(
 		"id":   id.ID,
 		"type": id.Type,
 	}
-	metric, err := namedQueryOneContext[types.Metrics](ctx, r.db, r.txProvider, metricGetByIDQuery, args)
+
+	var metric types.Metrics
+
+	executor := getExecutor(ctx, r.db, r.txGetter)
+
+	stmt, err := executor.PrepareNamedContext(ctx, metricGetByIDQuery)
 	if err != nil {
 		return nil, err
 	}
-	return metric, nil
+	defer stmt.Close()
+
+	if err := stmt.GetContext(ctx, &metric, args); err != nil {
+		return nil, err
+	}
+
+	return &metric, nil
 }
 
 const metricGetByIDQuery = `
