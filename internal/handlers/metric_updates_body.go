@@ -8,10 +8,14 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricUpdatesBodyService описывает сервис для обновления нескольких метрик, полученных из тела запроса.
 type MetricUpdatesBodyService interface {
+	// Updates принимает срез метрик, обновляет их и возвращает обновлённые метрики или ошибку.
 	Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error)
 }
 
+// NewMetricUpdatesBodyHandler создаёт HTTP-обработчик для обновления метрик из JSON-массива в теле запроса.
+// Валидирует данные, вызывает сервис обновления и возвращает обновлённые метрики в JSON-формате.
 func NewMetricUpdatesBodyHandler(
 	svc MetricUpdatesBodyService,
 ) http.HandlerFunc {
@@ -45,7 +49,6 @@ func NewMetricUpdatesBodyHandler(
 				http.Error(w, "Invalid metric type", http.StatusBadRequest)
 				return
 			}
-
 		}
 
 		metricsUpdated, err := svc.Updates(r.Context(), reqs)

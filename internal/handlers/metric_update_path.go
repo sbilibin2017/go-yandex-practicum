@@ -8,10 +8,15 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricUpdatePathService описывает сервис для обновления метрик на основе данных из URL-параметров.
 type MetricUpdatePathService interface {
+	// Updates обновляет переданные метрики и возвращает обновлённые или ошибку.
 	Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error)
 }
 
+// NewMetricUpdatePathHandler создаёт HTTP-обработчик для обновления метрик через URL-параметры.
+// Ожидает параметры name (имя метрики), type (тип метрики) и value (значение метрики) в URL.
+// Обрабатывает запрос, валидирует параметры, вызывает сервис обновления и возвращает статус операции.
 func NewMetricUpdatePathHandler(
 	svc MetricUpdatePathService,
 ) http.HandlerFunc {

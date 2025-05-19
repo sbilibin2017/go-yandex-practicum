@@ -15,15 +15,28 @@ import (
 	"go.uber.org/zap"
 )
 
+// MetricFacade описывает интерфейс для обновления метрик.
+// Он предоставляет метод Updates, который принимает пакет метрик для обработки.
 type MetricFacade interface {
+	// Updates обновляет метрики, переданные в параметре metrics.
 	Updates(ctx context.Context, metrics []types.Metrics) error
 }
 
+// result представляет результат обработки пакета метрик,
+// включая сами метрики и ошибку, если она произошла.
 type result struct {
 	Data []types.Metrics
 	Err  error
 }
 
+// NewMetricAgentWorker возвращает функцию-воркер, которая собирает и
+// отправляет метрики по заданным интервалам с контролем скорости и пакетной обработкой.
+// Параметры:
+// - facade: интерфейс для обновления метрик,
+// - pollInterval: интервал в секундах для опроса метрик,
+// - reportInterval: интервал в секундах для отправки отчёта метрик,
+// - rateLimit: количество рабочих горутин для обработки метрик,
+// - batchSize: размер пакета метрик для отправки за раз.
 func NewMetricAgentWorker(
 	facade MetricFacade,
 	pollInterval int,
@@ -43,6 +56,8 @@ func NewMetricAgentWorker(
 	}
 }
 
+// startMetricAgent запускает основной цикл агента метрик,
+// который периодически собирает данные и отправляет их через пул воркеров.
 func startMetricAgent(
 	ctx context.Context,
 	facade MetricFacade,
@@ -65,12 +80,15 @@ func startMetricAgent(
 			return ctx.Err()
 
 		case <-pollTicker.C:
+			// Собираем метрики из разных источников
 			runtimeCh := generatorMetrics(ctx, getRuntimeGaugeMetrics)
 			counterCh := generatorMetrics(ctx, getRuntimeCounterMetrics)
 			gopsutilCh := generatorMetrics(ctx, getGoputilMetrics)
+			// Объединяем каналы в один
 			metricsFanInCh = fanInMetrics(ctx, runtimeCh, counterCh, gopsutilCh)
 
 		case <-reportTicker.C:
+			// Отправляем собранные метрики через пул воркеров
 			results := workerPoolMetricsUpdate(
 				ctx,
 				facade,

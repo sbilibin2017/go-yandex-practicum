@@ -7,11 +7,16 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricGetByIDDBRepository представляет реализацию репозитория для получения метрики по идентификатору из базы данных.
 type MetricGetByIDDBRepository struct {
 	db       *sqlx.DB
 	txGetter func(ctx context.Context) *sqlx.Tx
 }
 
+// NewMetricGetByIDDBRepository создает новый экземпляр репозитория MetricGetByIDDBRepository.
+// Параметры:
+//   - db: подключение к базе данных.
+//   - txGetter: функция получения текущей транзакции из контекста.
 func NewMetricGetByIDDBRepository(
 	db *sqlx.DB,
 	txGetter func(ctx context.Context) *sqlx.Tx,
@@ -22,6 +27,13 @@ func NewMetricGetByIDDBRepository(
 	}
 }
 
+// GetByID извлекает метрику из базы данных по идентификатору (id и type).
+// Использует транзакцию из контекста, если она присутствует.
+// Параметры:
+//   - ctx: контекст выполнения.
+//   - id: структура идентификатора метрики.
+//
+// Возвращает найденную метрику или ошибку, если метрика не найдена или возникла проблема с запросом.
 func (r *MetricGetByIDDBRepository) GetByID(
 	ctx context.Context,
 	id types.MetricID,
@@ -48,6 +60,7 @@ func (r *MetricGetByIDDBRepository) GetByID(
 	return &metric, nil
 }
 
+// SQL-запрос для получения метрики по id и type.
 const metricGetByIDQuery = `
 SELECT id, type, delta, value
 FROM content.metrics

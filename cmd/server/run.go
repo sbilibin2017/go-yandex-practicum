@@ -28,6 +28,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// run инициализирует и запускает HTTP-сервер с конфигурацией и middleware.
+// В зависимости от настроек, выбирается хранилище (файл, БД или память).
+// Обрабатываются системные сигналы для корректного завершения работы сервера.
 func run() error {
 	if err := logger.Initialize(logLevel); err != nil {
 		return err
@@ -59,12 +62,6 @@ func run() error {
 			logger.Log.Error("Failed to apply migrations", zap.Error(err))
 			return err
 		}
-	}
-
-	var storeTicker *time.Ticker
-	if storeInterval > 0 {
-		storeTicker = time.NewTicker(time.Duration(storeInterval) * time.Second)
-		defer storeTicker.Stop()
 	}
 
 	var (

@@ -8,10 +8,16 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricGetBodyService описывает сервис для получения метрики по ID,
+// где ID передаётся в теле запроса.
 type MetricGetBodyService interface {
+	// Get возвращает метрику по её ID или ошибку.
 	Get(ctx context.Context, metricID types.MetricID) (*types.Metrics, error)
 }
 
+// NewMetricGetBodyHandler создаёт HTTP-обработчик для получения метрики,
+// где ID и тип метрики принимаются из JSON-тела POST-запроса.
+// Возвращает метрику в JSON или ошибку.
 func NewMetricGetBodyHandler(
 	svc MetricGetBodyService,
 ) http.HandlerFunc {
