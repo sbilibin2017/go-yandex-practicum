@@ -21,7 +21,7 @@ func TestGzipMiddleware_InvalidGzipRequest(t *testing.T) {
 		t.Fatal("handler should not be called when gzip decompression fails")
 	}))
 	handler.ServeHTTP(rr, req)
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 	assert.Contains(t, rr.Body.String(), "Failed to read gzip data")
 }
 

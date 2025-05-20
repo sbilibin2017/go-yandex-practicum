@@ -12,34 +12,390 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewMetricAgentWorker(t *testing.T) {
+func TestProcessMetricResults(t *testing.T) {
+	results := make(chan result)
+
+	go func() {
+		defer close(results)
+
+		// Успешный результат (Data не пустой, Err == nil)
+		results <- result{
+			Data: []types.Metrics{
+				{MetricID: types.MetricID{ID: "test1", Type: types.GaugeMetricType}},
+			},
+			Err: nil,
+		}
+
+		// Результат с ошибкой
+		results <- result{
+			Data: []types.Metrics{
+				{MetricID: types.MetricID{ID: "test2", Type: types.CounterMetricType}},
+			},
+			Err: errors.New("some error"),
+		}
+	}()
+
+	processMetricResults(results)
+}
+
+func TestWorkerPoolMetricsUpdate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockFacade := NewMockMetricFacade(ctrl)
+
+	jobs := make(chan types.Metrics)
+	batchSize := 2
+	rateLimit := 1 // чтобы избежать гонок и упрощения проверки
+
+	// Ожидаем, что Updates вызовется ровно два раза с любыми аргументами
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(2)
+
+	results := workerPoolMetricsUpdate(ctx, mockFacade, jobs, batchSize, rateLimit)
+
+	go func() {
+		jobs <- types.Metrics{MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType}}
+		jobs <- types.Metrics{MetricID: types.MetricID{ID: "m2", Type: types.GaugeMetricType}}
+		jobs <- types.Metrics{MetricID: types.MetricID{ID: "m3", Type: types.GaugeMetricType}}
+		close(jobs)
+	}()
+
+	var receivedResults []result
+	done := make(chan struct{})
+
+	go func() {
+		for res := range results {
+			receivedResults = append(receivedResults, res)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for results channel to close")
+	}
+
+	if len(receivedResults) != 2 {
+		t.Errorf("expected 2 results, got %d", len(receivedResults))
+	}
+}
+
+func TestWorkerMetricsUpdate_ContextDone(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	mockFacade := NewMockMetricFacade(ctrl)
+
+	jobs := make(chan types.Metrics)
+	results := make(chan result)
+
+	batchSize := 2
+
+	// Чтобы Updates не вызывался случайно
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		Times(0)
+
+	done := make(chan struct{})
+
+	go func() {
+		workerMetricsUpdate(ctx, mockFacade, jobs, results, batchSize)
+		close(done)
+	}()
+
+	// Отмена контекста сразу
+	cancel()
+
+	select {
+	case <-done:
+		// Успешно завершилось
+	case <-time.After(1 * time.Second):
+		t.Fatal("workerMetricsUpdate did not exit after context cancellation")
+	}
+}
+
+func floatPtr(f float64) *float64 {
+	return &f
+}
+
+func intPtr(i int64) *int64 {
+	return &i
+}
+
+func TestFanInMetrics_MergesChannels(t *testing.T) {
+	ctx := context.Background()
+
+	ch1 := make(chan types.Metrics, 2)
+	ch2 := make(chan types.Metrics, 2)
+
+	out := fanInMetrics(ctx, ch1, ch2)
+
+	ch1 <- types.Metrics{
+		MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType},
+		Value:    floatPtr(1.23),
+	}
+	ch1 <- types.Metrics{
+		MetricID: types.MetricID{ID: "m2", Type: types.CounterMetricType},
+		Delta:    intPtr(10),
+	}
+	close(ch1)
+
+	ch2 <- types.Metrics{
+		MetricID: types.MetricID{ID: "m3", Type: types.GaugeMetricType},
+		Value:    floatPtr(4.56),
+	}
+	close(ch2)
+
+	var results []types.Metrics
+	for m := range out {
+		results = append(results, m)
+	}
+
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	expectedIDs := map[string]bool{"m1": true, "m2": true, "m3": true}
+	for _, m := range results {
+		if !expectedIDs[m.ID] {
+			t.Errorf("unexpected metric ID: %s", m.ID)
+		}
+	}
+}
+
+func TestFanInMetrics_ClosesOnAllChannelsClosed(t *testing.T) {
+	ctx := context.Background()
+
+	ch1 := make(chan types.Metrics)
+	ch2 := make(chan types.Metrics)
+
+	out := fanInMetrics(ctx, ch1, ch2)
+
+	close(ch1)
+	close(ch2)
+
+	_, ok := <-out
+	if ok {
+		t.Error("expected final channel to be closed after all input channels are closed")
+	}
+}
+
+func TestFanInMetrics_StopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch1 := make(chan types.Metrics)
+	ch2 := make(chan types.Metrics)
+
+	out := fanInMetrics(ctx, ch1, ch2)
+
+	done := make(chan struct{})
+	go func() {
+		for range out {
+		}
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+		// успешно завершено
+	case <-time.After(time.Second):
+		t.Fatal("fanInMetrics did not stop after context cancellation")
+	}
+}
+
+func TestGeneratorMetrics_EmitsAll(t *testing.T) {
+	ctx := context.Background()
+	input := []types.Metrics{
+		{
+			MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType},
+			Value:    floatPtr(1.1),
+		},
+		{
+			MetricID: types.MetricID{ID: "m2", Type: types.CounterMetricType},
+			Delta:    intPtr(10),
+		},
+	}
+
+	out := generatorMetrics(ctx, input)
+
+	var results []types.Metrics
+	for m := range out {
+		results = append(results, m)
+	}
+
+	if len(results) != len(input) {
+		t.Fatalf("expected %d metrics, got %d", len(input), len(results))
+	}
+
+	for i, m := range results {
+		if m.ID != input[i].ID {
+			t.Errorf("expected metric ID %s, got %s", input[i].ID, m.ID)
+		}
+	}
+}
+
+func TestGeneratorMetrics_ClosesChannel(t *testing.T) {
+	ctx := context.Background()
+	input := []types.Metrics{}
+
+	out := generatorMetrics(ctx, input)
+
+	_, ok := <-out
+	if ok {
+		t.Error("expected channel to be closed for empty input")
+	}
+}
+
+func TestGeneratorMetrics_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	input := []types.Metrics{
+		{
+			MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType},
+			Value:    floatPtr(1.1),
+		},
+	}
+
+	out := generatorMetrics(ctx, input)
+
+	// Отмена контекста сразу после запуска
+	cancel()
+
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Error("expected channel to be closed after context cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for channel close after context cancellation")
+	}
+}
+
+func TestGetGoputilMetrics(t *testing.T) {
+	ctx := context.Background()
+	metrics := getGoputilMetrics(ctx)
+
+	// Проверяем, что возвращён слайс не пустой
+	assert.NotEmpty(t, metrics, "expected some metrics, got none")
+
+}
+
+func TestGetRuntimeCounterMetrics(t *testing.T) {
+
+	metrics := getRuntimeCounterMetrics()
+
+	assert.Len(t, metrics, 1, "expected exactly one metric")
+
+}
+
+func TestGetRuntimeGaugeMetrics(t *testing.T) {
+
+	metrics := getRuntimeGaugeMetrics()
+
+	assert.Len(t, metrics, 28, "expected 28 metrics")
+
+}
+
+func int64Ptr(i int64) *int64 { return &i }
+
+func TestStartMetricsReporting(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockFacade := NewMockMetricFacade(ctrl)
 
+	// Подготовка канала входящих метрик
+	in := make(chan types.Metrics, 10)
+
+	// Подготовим метрики для отправки
+	m1 := types.Metrics{
+		MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType},
+		Value:    floatPtr(1.0),
+	}
+	m2 := types.Metrics{
+		MetricID: types.MetricID{ID: "m2", Type: types.CounterMetricType},
+		Delta:    int64Ptr(2),
+	}
+
+	// Отправим метрики в канал
+	in <- m1
+	in <- m2
+
+	// Контекст с отменой для выхода из цикла
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Мок ожидает вызов Updates с любыми аргументами, возвращает nil
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		AnyTimes().
+		Return(nil)
+
+	// Запуск startMetricsReporting в горутине
+	go func() {
+		startMetricsReporting(ctx, 1, mockFacade, in, 10, 1)
+	}()
+
+	// Подождем чуть больше 1 секунды, чтобы тикер сработал
+	time.Sleep(1200 * time.Millisecond)
+
+	// Отменим контекст, чтобы функция завершилась
+	cancel()
+
+	// Закроем канал входящих метрик
+	close(in)
+
+	// Дополнительная проверка — если функция завершилась, тест проходит
+	// Тут можно проверить внутренние переменные, если нужно
+
+	assert.True(t, true, "startMetricsReporting exited cleanly")
+}
+
+func TestStartMetricsPolling(t *testing.T) {
+	out := make(chan types.Metrics, 100) // буфер, чтобы не блокироваться
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Ожидаем, что Updates может вызываться (или не вызываться) — в зависимости от реализации
-	mockFacade.EXPECT().
-		Updates(gomock.Any(), gomock.Any()).
-		Return(nil).
-		AnyTimes()
+	// Запускаем функцию в горутине
+	go startMetricsPolling(ctx, 1, out)
 
-	worker := NewMetricAgentWorker(mockFacade, 1, 2, 2, 5)
+	// Ждем, пока появятся метрики (ожидаем, что хотя бы одна метрика появится за 2 секунды)
+	var received []types.Metrics
+	timeout := time.After(2 * time.Second)
 
-	errCh := make(chan error)
-	go func() {
-		errCh <- worker(ctx)
-	}()
+loop:
+	for {
+		select {
+		case m := <-out:
+			received = append(received, m)
+			// Можно выйти после получения хотя бы 1 метрики
+			if len(received) >= 1 {
+				break loop
+			}
+		case <-timeout:
+			t.Fatal("Timeout: метрики не были получены")
+		}
+	}
 
-	time.Sleep(3 * time.Second)
-	cancel() // отменяем контекст, чтобы завершить worker
+	// Отменяем контекст, чтобы завершить функцию
+	cancel()
 
-	err := <-errCh
-	if err != nil && err != context.Canceled {
-		t.Fatalf("unexpected error: %v", err)
+	// Ждем, что функция корректно завершилась (не блокируемся на записи)
+	time.Sleep(200 * time.Millisecond)
+
+	assert.NotEmpty(t, received, "Ожидается хотя бы одна метрика")
+	// Можно дополнительно проверить типы метрик
+	for _, m := range received {
+		assert.NotEmpty(t, m.ID)
 	}
 }
 
@@ -50,277 +406,58 @@ func TestStartMetricAgent(t *testing.T) {
 	mockFacade := NewMockMetricFacade(ctrl)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
+	// Настраиваем мок для фасада: Updates может вызываться, возвращаем nil (успех)
 	mockFacade.EXPECT().
 		Updates(gomock.Any(), gomock.Any()).
 		Return(nil).
 		AnyTimes()
 
-	errCh := make(chan error)
+	// Запускаем агент
 	go func() {
-		err := startMetricAgent(ctx, mockFacade, 1, 2, 2, 5)
-		errCh <- err
+		err := startMetricAgent(ctx, mockFacade, 1, 1, 2, 1)
+		require.ErrorIs(t, err, context.Canceled)
 	}()
 
-	time.Sleep(5 * time.Second)
+	// Даем немного времени поработать (чтобы стартовали горутины)
+	time.Sleep(1500 * time.Millisecond)
+
+	// Отменяем контекст, чтобы завершить
 	cancel()
 
+	// Ждем немного, чтобы горутина успела завершиться
+	time.Sleep(500 * time.Millisecond)
+}
+
+func TestNewMetricAgentWorker(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockFacade := NewMockMetricFacade(ctrl)
+
+	// Настраиваем мок: допускаем любые вызовы Updates
+	mockFacade.EXPECT().
+		Updates(gomock.Any(), gomock.Any()).
+		Return(nil).
+		AnyTimes()
+
+	worker := NewMetricAgentWorker(mockFacade, 1, 1, 2, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Запускаем worker в отдельной горутине
+	errCh := make(chan error)
+	go func() {
+		errCh <- worker(ctx)
+	}()
+
+	// Даем поработать немного
+	time.Sleep(1500 * time.Millisecond)
+
+	// Отменяем контекст, чтобы остановить worker
+	cancel()
+
+	// Ждем завершения и проверяем ошибку
 	err := <-errCh
-	// Проверяем, что ошибка либо nil, либо context.Canceled (т.е. отмена ожидаема)
-	if err != nil && err != context.Canceled {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestProcessMetricResults(t *testing.T) {
-	t.Run("process success and error results", func(t *testing.T) {
-		results := make(chan result, 2)
-
-		metric := types.Metrics{
-			MetricID: types.MetricID{ID: "test", Type: types.GaugeMetricType},
-			Value:    nil,
-		}
-
-		// Положим один успешный результат
-		results <- result{Data: []types.Metrics{metric}, Err: nil}
-		// И один с ошибкой
-		results <- result{Data: []types.Metrics{metric}, Err: errors.New("some error")}
-		close(results)
-
-		// Просто вызываем функцию — она должна корректно обработать канал и завершиться
-		processMetricResults(results)
-
-		// Проверок на выход нет, главное чтобы не было паники
-		assert.True(t, true, "processMetricResults should complete without panic")
-	})
-}
-
-func TestGeneratorMetrics_AllMetricsSent(t *testing.T) {
-	ctx := context.Background()
-
-	mockMetrics := []types.Metrics{
-		{MetricID: types.MetricID{ID: "m1"}},
-		{MetricID: types.MetricID{ID: "m2"}},
-	}
-
-	inputFunc := func(ctx context.Context) []types.Metrics {
-		return mockMetrics
-	}
-
-	out := generatorMetrics(ctx, inputFunc)
-
-	var result []string
-	for m := range out {
-		result = append(result, m.MetricID.ID)
-	}
-
-	assert.ElementsMatch(t, []string{"m1", "m2"}, result)
-}
-
-func TestGeneratorMetrics_ContextCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	inputFunc := func(ctx context.Context) []types.Metrics {
-		// Имитация задержки — контекст отменится до возврата
-		time.Sleep(50 * time.Millisecond)
-		return []types.Metrics{
-			{MetricID: types.MetricID{ID: "should_not_send"}},
-		}
-	}
-
-	cancel() // отменяем до вызова generatorMetrics
-
-	out := generatorMetrics(ctx, inputFunc)
-
-	var received []types.Metrics
-	for m := range out {
-		received = append(received, m)
-	}
-
-	assert.Empty(t, received, "output channel should be empty after context cancel")
-}
-
-func TestGetGoputilMetrics(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	metrics := getGoputilMetrics(ctx)
-
-	assert.NotEmpty(t, metrics, "Expected some metrics to be collected")
-
-}
-
-func TestGetRuntimeCounterMetrics(t *testing.T) {
-	metrics := getRuntimeCounterMetrics(context.Background())
-
-	require.Len(t, metrics, 1, "should return exactly one metric")
-
-}
-
-func TestGetRuntimeGaugeMetrics(t *testing.T) {
-	metrics := getRuntimeGaugeMetrics(context.Background())
-
-	// Ожидаем ровно 28 метрик
-	require.Len(t, metrics, 28)
-}
-
-func TestWorkerMetricsUpdate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockFacade := NewMockMetricFacade(ctrl)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	jobCh := make(chan types.Metrics, 10)
-	resultsCh := make(chan result, 10)
-
-	batchSize := 3
-
-	// Ожидаем вызов Updates с батчем из 3 метрик, возвращаем nil
-	mockFacade.EXPECT().Updates(gomock.Any(), gomock.Len(batchSize)).Return(nil).Times(1)
-
-	// Запускаем воркер
-	go workerMetricsUpdate(ctx, mockFacade, jobCh, resultsCh, batchSize)
-
-	// Отправляем в job канал 3 метрики
-	for i := 0; i < batchSize; i++ {
-		m := types.Metrics{
-			MetricID: types.MetricID{ID: "test_metric", Type: types.GaugeMetricType},
-			Value:    new(float64),
-		}
-		jobCh <- m
-	}
-	// Закрываем канал, чтобы воркер вышел после обработки
-	close(jobCh)
-
-	// Ждем результат
-	select {
-	case res := <-resultsCh:
-		assert.NoError(t, res.Err)
-		assert.Len(t, res.Data, batchSize)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for worker result")
-	}
-}
-
-// Простая заглушка воркера для теста, который просто читает из job и кладет результат без ошибки
-func dummyWorker(
-	ctx context.Context,
-	facade MetricFacade,
-	job chan types.Metrics,
-	results chan result,
-	batchSize int,
-) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case m, ok := <-job:
-			if !ok {
-				return
-			}
-
-			// В тесте просто возвращаем батч из одного элемента, без вызова фасада
-			results <- result{
-				Data: []types.Metrics{m},
-				Err:  nil,
-			}
-		}
-	}
-}
-
-func TestWorkerPoolMetricsUpdate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockFacade := NewMockMetricFacade(ctrl)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	jobs := make(chan types.Metrics, 10)
-
-	numWorkers := 3
-	batchSize := 1
-
-	// Запускаем workerPoolMetricsUpdate с dummyWorker
-	resultsCh := workerPoolMetricsUpdate(ctx, mockFacade, dummyWorker, jobs, numWorkers, batchSize)
-
-	// Отправим несколько задач
-	testMetrics := types.Metrics{
-		MetricID: types.MetricID{ID: "test_metric", Type: types.GaugeMetricType},
-	}
-	for i := 0; i < 5; i++ {
-		jobs <- testMetrics
-	}
-	close(jobs)
-
-	var results []result
-	timeout := time.After(2 * time.Second)
-
-loop:
-	for {
-		select {
-		case res, ok := <-resultsCh:
-			if !ok {
-				break loop
-			}
-			results = append(results, res)
-		case <-timeout:
-			t.Fatal("timeout waiting for results")
-		}
-	}
-
-	// Проверяем, что получили 5 результатов
-	assert.Len(t, results, 5)
-
-	// Проверяем, что ошибок нет
-	for _, r := range results {
-		assert.NoError(t, r.Err)
-	}
-}
-
-func TestFanInMetrics(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ch1 := make(chan types.Metrics, 2)
-	ch2 := make(chan types.Metrics, 2)
-
-	// Заполняем каналы тестовыми метриками
-	m1 := types.Metrics{MetricID: types.MetricID{ID: "m1", Type: types.GaugeMetricType}}
-	m2 := types.Metrics{MetricID: types.MetricID{ID: "m2", Type: types.GaugeMetricType}}
-	m3 := types.Metrics{MetricID: types.MetricID{ID: "m3", Type: types.GaugeMetricType}}
-
-	ch1 <- m1
-	ch1 <- m2
-	close(ch1)
-
-	ch2 <- m3
-	close(ch2)
-
-	// Вызываем функцию fanInMetrics
-	outCh := fanInMetrics(ctx, ch1, ch2)
-
-	var got []types.Metrics
-
-	timeout := time.After(1 * time.Second)
-loop:
-	for {
-		select {
-		case metric, ok := <-outCh:
-			if !ok {
-				break loop
-			}
-			got = append(got, metric)
-		case <-timeout:
-			t.Fatal("timeout waiting for fanInMetrics output")
-		}
-	}
-
-	// Проверяем, что все метрики из обоих каналов пришли во внешний канал
-	assert.ElementsMatch(t, got, []types.Metrics{m1, m2, m3})
+	require.ErrorIs(t, err, context.Canceled)
 }

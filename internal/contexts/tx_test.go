@@ -1,4 +1,4 @@
-package tx
+package contexts
 
 import (
 	"context"
@@ -25,16 +25,16 @@ func TestSetTxToContextAndGetTxFromContext(t *testing.T) {
 
 	// Кладём транзакцию в контекст
 	ctx := context.Background()
-	ctxWithTx := SetTxToContext(ctx, txObj)
+	ctxWithTx := SetTx(ctx, txObj)
 
 	// Получаем транзакцию из контекста
-	txFromCtx := GetTxFromContext(ctxWithTx)
+	txFromCtx := GetTx(ctxWithTx)
 
 	assert.NotNil(t, txFromCtx)
 	assert.Equal(t, txObj, txFromCtx)
 
 	// Проверяем, что из пустого контекста вернется nil
-	txFromEmptyCtx := GetTxFromContext(context.Background())
+	txFromEmptyCtx := GetTx(context.Background())
 	assert.Nil(t, txFromEmptyCtx)
 
 	// Завершаем транзакцию

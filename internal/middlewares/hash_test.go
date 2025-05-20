@@ -5,92 +5,158 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func testHashFunc(data []byte, key string) string {
-	h := hmac.New(sha256.New, []byte(key))
-	h.Write(data)
-	return hex.EncodeToString(h.Sum(nil))
+type brokenReader struct{}
+
+func (b *brokenReader) Read(p []byte) (n int, err error) {
+	return 0, io.ErrUnexpectedEOF
 }
 
-func testCompareFunc(hash1, hash2 string) bool {
-	return hmac.Equal([]byte(hash1), []byte(hash2))
+func TestHashMiddleware_BodyReadError(t *testing.T) {
+	key := "secretkey"
+	header := "X-Hash"
+
+	brokenBody := &brokenReader{}
+
+	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called if body read fails")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", brokenBody)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(respBody), "Failed to read request body")
 }
 
-func TestHashMiddleware_NoKey(t *testing.T) {
+func TestHashMiddleware_EmptyKey_ReturnsNext(t *testing.T) {
 	key := ""
-	headerName := "X-Hash"
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+	header := "X-Hash"
+
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
 	})
-	handler := HashMiddleware(key, headerName, testHashFunc, testCompareFunc)
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+
+	handler := HashMiddleware(key, header)(next)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	handler(nextHandler).ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "ok", w.Body.String())
-	assert.Empty(t, w.Header().Get(headerName))
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close() // ✅ Добавлено для предотвращения утечки
+
+	assert.True(t, called, "Next handler should be called")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-func TestHashMiddleware_CorrectHash(t *testing.T) {
-	key := "secret"
-	headerName := "X-Hash"
-	body := []byte(`{"metric":"value"}`)
-	correctHash := testHashFunc(body, key)
+func TestHashMiddleware_ValidHash(t *testing.T) {
+	key := "secretkey"
+	header := "X-Hash"
+
+	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.Write(bodyBytes)
+	}))
+
+	body := []byte(`{"foo":"bar"}`)
+
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write(body)
+	expectedMAC := mac.Sum(nil)
+	expectedHash := hex.EncodeToString(expectedMAC)
+
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	req.Header.Set(headerName, correctHash)
+	req.Header.Set(header, expectedHash)
 	w := httptest.NewRecorder()
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("response data"))
-	})
-	handler := HashMiddleware(key, headerName, testHashFunc, testCompareFunc)
-	handler(nextHandler).ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "response data", w.Body.String())
-	expectedRespHash := testHashFunc([]byte("response data"), key)
-	assert.Equal(t, expectedRespHash, w.Header().Get(headerName))
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, string(body), string(respBody))
+	assert.Equal(t, expectedHash, resp.Header.Get(header))
 }
 
-func TestHashMiddleware_IncorrectHash(t *testing.T) {
-	key := "secret"
-	headerName := "X-Hash"
-	body := []byte(`{"metric":"value"}`)
-	incorrectHash := "bad_hash"
+func TestHashMiddleware_MissingHash(t *testing.T) {
+	key := "secretkey"
+	header := "X-Hash"
+
+	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.Write(bodyBytes)
+	}))
+
+	body := []byte(`{"foo":"bar"}`)
+
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-	req.Header.Set(headerName, incorrectHash)
 	w := httptest.NewRecorder()
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("nextHandler should not be called on hash mismatch")
-	})
-	handler := HashMiddleware(key, headerName, testHashFunc, testCompareFunc)
-	handler(nextHandler).ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "hash mismatch")
+
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, string(body), string(respBody))
+
+	mac := hmac.New(sha256.New, []byte(key))
+	mac.Write(body)
+	expectedHash := hex.EncodeToString(mac.Sum(nil))
+	assert.Equal(t, expectedHash, resp.Header.Get(header))
 }
 
-func TestHashMiddleware_ReadBodyError(t *testing.T) {
-	key := "secret"
-	headerName := "X-Hash"
-	brokenReader := &errReader{}
-	req := httptest.NewRequest(http.MethodPost, "/", brokenReader)
+func TestHashMiddleware_InvalidHash(t *testing.T) {
+	key := "secretkey"
+	header := "X-Hash"
+
+	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called if hash mismatch")
+	}))
+
+	body := []byte(`{"foo":"bar"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set(header, "invalidhashvalue")
 	w := httptest.NewRecorder()
-	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("nextHandler should not be called when body read fails")
-	})
-	handler := HashMiddleware(key, headerName, testHashFunc, testCompareFunc)
-	handler(nextHandler).ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "failed to read request body")
-}
 
-type errReader struct{}
+	handler.ServeHTTP(w, req)
 
-func (r *errReader) Read(p []byte) (int, error) {
-	return 0, errors.New("read error")
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(respBody), "Hash mismatch")
 }
