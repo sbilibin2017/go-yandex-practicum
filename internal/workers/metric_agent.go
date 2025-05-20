@@ -15,34 +15,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// MetricFacade описывает интерфейс для обновления метрик.
-// Он предоставляет метод Updates, который принимает пакет метрик для обработки.
 type MetricFacade interface {
-	// Updates обновляет метрики, переданные в параметре metrics.
 	Updates(ctx context.Context, metrics []types.Metrics) error
 }
 
-// result представляет результат обработки пакета метрик,
-// включая сами метрики и ошибку, если она произошла.
 type result struct {
 	Data []types.Metrics
 	Err  error
 }
 
-// NewMetricAgentWorker возвращает функцию-воркер, которая собирает и
-// отправляет метрики по заданным интервалам с контролем скорости и пакетной обработкой.
-// Параметры:
-// - facade: интерфейс для обновления метрик,
-// - pollInterval: интервал в секундах для опроса метрик,
-// - reportInterval: интервал в секундах для отправки отчёта метрик,
-// - rateLimit: количество рабочих горутин для обработки метрик,
-// - batchSize: размер пакета метрик для отправки за раз.
 func NewMetricAgentWorker(
 	facade MetricFacade,
 	pollInterval int,
 	reportInterval int,
-	rateLimit int,
 	batchSize int,
+	rateLimit int,
 ) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		return startMetricAgent(
@@ -50,60 +37,82 @@ func NewMetricAgentWorker(
 			facade,
 			pollInterval,
 			reportInterval,
-			rateLimit,
 			batchSize,
+			rateLimit,
 		)
 	}
 }
 
-// startMetricAgent запускает основной цикл агента метрик,
-// который периодически собирает данные и отправляет их через пул воркеров.
 func startMetricAgent(
 	ctx context.Context,
 	facade MetricFacade,
 	pollInterval int,
 	reportInterval int,
-	rateLimit int,
 	batchSize int,
+	rateLimit int,
 ) error {
-	pollTicker := time.NewTicker(time.Duration(pollInterval) * time.Second)
-	defer pollTicker.Stop()
+	metricsCh := make(chan types.Metrics, 1000)
 
-	reportTicker := time.NewTicker(time.Duration(reportInterval) * time.Second)
-	defer reportTicker.Stop()
+	go startMetricsPolling(ctx, pollInterval, metricsCh)
+	go startMetricsReporting(ctx, reportInterval, facade, metricsCh, batchSize, rateLimit)
 
-	var metricsFanInCh chan types.Metrics
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func startMetricsPolling(ctx context.Context, pollInterval int, out chan<- types.Metrics) {
+	ticker := time.NewTicker(time.Duration(pollInterval) * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
+		case <-ticker.C:
+			runtimeCh := generatorMetrics(ctx, getRuntimeGaugeMetrics())
+			counterCh := generatorMetrics(ctx, getRuntimeCounterMetrics())
+			gopsutilCh := generatorMetrics(ctx, getGoputilMetrics(ctx))
 
-		case <-pollTicker.C:
-			// Собираем метрики из разных источников
-			runtimeCh := generatorMetrics(ctx, getRuntimeGaugeMetrics)
-			counterCh := generatorMetrics(ctx, getRuntimeCounterMetrics)
-			gopsutilCh := generatorMetrics(ctx, getGoputilMetrics)
-			// Объединяем каналы в один
-			metricsFanInCh = fanInMetrics(ctx, runtimeCh, counterCh, gopsutilCh)
-
-		case <-reportTicker.C:
-			// Отправляем собранные метрики через пул воркеров
-			results := workerPoolMetricsUpdate(
-				ctx,
-				facade,
-				workerMetricsUpdate,
-				metricsFanInCh,
-				rateLimit,
-				batchSize,
-			)
-			processMetricResults(results)
-			metricsFanInCh = nil
+			for metric := range fanInMetrics(ctx, runtimeCh, counterCh, gopsutilCh) {
+				select {
+				case out <- metric:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 	}
 }
 
-func getRuntimeGaugeMetrics(ctx context.Context) []types.Metrics {
+func startMetricsReporting(
+	ctx context.Context,
+	reportInterval int,
+	facade MetricFacade,
+	in <-chan types.Metrics,
+	batchSize int,
+	rateLimit int,
+) {
+	ticker := time.NewTicker(time.Duration(reportInterval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			results := workerPoolMetricsUpdate(
+				ctx,
+				facade,
+				in,
+				batchSize,
+				rateLimit,
+			)
+			processMetricResults(results)
+		}
+	}
+}
+
+func getRuntimeGaugeMetrics() []types.Metrics {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
@@ -168,7 +177,7 @@ func getRuntimeGaugeMetrics(ctx context.Context) []types.Metrics {
 	}
 }
 
-func getRuntimeCounterMetrics(ctx context.Context) []types.Metrics {
+func getRuntimeCounterMetrics() []types.Metrics {
 	pollCount := int64(1)
 
 	return []types.Metrics{
@@ -212,7 +221,7 @@ func getGoputilMetrics(ctx context.Context) []types.Metrics {
 
 func generatorMetrics(
 	ctx context.Context,
-	inputFunc func(ctx context.Context) []types.Metrics,
+	input []types.Metrics,
 ) chan types.Metrics {
 	out := make(chan types.Metrics, 100)
 
@@ -225,7 +234,7 @@ func generatorMetrics(
 		default:
 		}
 
-		for _, item := range inputFunc(ctx) {
+		for _, item := range input {
 			out <- item
 		}
 	}()
@@ -273,7 +282,7 @@ func fanInMetrics(ctx context.Context, resultChs ...chan types.Metrics) chan typ
 func workerMetricsUpdate(
 	ctx context.Context,
 	facade MetricFacade,
-	job chan types.Metrics,
+	jobs <-chan types.Metrics,
 	results chan result,
 	batchSize int,
 ) {
@@ -281,7 +290,7 @@ func workerMetricsUpdate(
 		select {
 		case <-ctx.Done():
 			return
-		case m, ok := <-job:
+		case m, ok := <-jobs:
 			if !ok {
 				return
 			}
@@ -291,7 +300,7 @@ func workerMetricsUpdate(
 		collectLoop:
 			for len(batch) < batchSize {
 				select {
-				case m, ok := <-job:
+				case m, ok := <-jobs:
 					if !ok {
 						break collectLoop
 					}
@@ -314,20 +323,19 @@ func workerMetricsUpdate(
 func workerPoolMetricsUpdate(
 	ctx context.Context,
 	facade MetricFacade,
-	worker func(ctx context.Context, facade MetricFacade, job chan types.Metrics, results chan result, batchSize int),
-	jobs chan types.Metrics,
-	numWorkers int,
+	jobs <-chan types.Metrics,
 	batchSize int,
+	rateLimit int,
 ) chan result {
 	results := make(chan result)
 
 	var wg sync.WaitGroup
-	wg.Add(numWorkers)
+	wg.Add(rateLimit)
 
-	for i := 0; i < numWorkers; i++ {
+	for i := 0; i < rateLimit; i++ {
 		go func() {
 			defer wg.Done()
-			worker(ctx, facade, jobs, results, batchSize)
+			workerMetricsUpdate(ctx, facade, jobs, results, batchSize)
 		}()
 	}
 

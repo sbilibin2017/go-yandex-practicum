@@ -4,36 +4,21 @@ import (
 	"flag"
 	"os"
 	"strconv"
+	"time"
 )
 
 var (
-	// serverAddress задаёт адрес и порт, на котором будет запущен сервер.
-	serverAddress string
-
-	// databaseDSN хранит DSN (Data Source Name) для подключения к базе данных.
-	databaseDSN string
-
-	// storeInterval задаёт интервал (в секундах) для сохранения данных.
-	storeInterval int
-
-	// fileStoragePath содержит путь к файлу для хранения данных.
+	serverAddress   string
+	databaseDSN     string
+	storeInterval   int
 	fileStoragePath string
-
-	// restore указывает, нужно ли восстанавливать данные из резервной копии.
-	restore bool
-
-	// key используется для SHA256-хеширования.
-	key string
-
-	// header содержит имя HTTP-заголовка для передачи хеша.
-	header string
-
-	// logLevel задаёт уровень логирования.
-	logLevel string
+	restore         bool
+	key             string
+	header          string
+	logLevel        string
+	attempts        []time.Duration
 )
 
-// parseFlags считывает и парсит параметры командной строки и переменные окружения,
-// инициализируя конфигурацию приложения.
 func parseFlags() {
 	flag.StringVar(&serverAddress, "a", ":8080", "address and port to run server")
 	flag.StringVar(&databaseDSN, "d", "", "DSN (Data Source Name) for database connection")
@@ -44,7 +29,6 @@ func parseFlags() {
 
 	flag.Parse()
 
-	// Переопределение значений переменными окружения, если они заданы.
 	if env := os.Getenv("ADDRESS"); env != "" {
 		serverAddress = env
 	}
@@ -70,4 +54,5 @@ func parseFlags() {
 
 	header = "HashSHA256"
 	logLevel = "info"
+	attempts = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 }

@@ -24,7 +24,7 @@ func GzipMiddleware(next http.Handler) http.Handler {
 			gz, err := gzip.NewReader(r.Body)
 			if err != nil {
 				logger.Log.Error("Failed to read gzip data from request", zap.Error(err))
-				http.Error(w, "Failed to read gzip data", http.StatusBadRequest)
+				http.Error(w, "Failed to read gzip data", http.StatusInternalServerError)
 				return
 			}
 			defer gz.Close()

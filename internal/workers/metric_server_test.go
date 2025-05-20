@@ -176,7 +176,6 @@ func TestStartMetricServerWorker_RestoreMetricsSuccess(t *testing.T) {
 	cancel()
 
 	err := NewMetricServerWorker(
-		ctx,
 		mockMemList,
 		mockMemSave,
 		mockFileList,
@@ -219,7 +218,6 @@ func TestStartMetricServerWorker_StoreOnShutdown(t *testing.T) {
 	}()
 
 	err := NewMetricServerWorker(
-		ctx,
 		mockMemList,
 		nil,
 		nil,
@@ -245,7 +243,6 @@ func TestStartMetricServerWorker_RestoreFails(t *testing.T) {
 		Return(nil, errors.New("restore failed"))
 
 	err := NewMetricServerWorker(
-		context.Background(),
 		nil,
 		nil,
 		mockFileList,
@@ -289,7 +286,6 @@ func TestStartMetricServerWorker_SaveFails(t *testing.T) {
 	}()
 
 	err := NewMetricServerWorker(
-		ctx,
 		mockMemList,
 		nil,
 		nil,
