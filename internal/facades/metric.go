@@ -9,6 +9,8 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricFacade инкапсулирует логику отправки метрик на внешний HTTP-сервер.
+// Поддерживает сериализацию, установку заголовков и вычисление хеша тела запроса.
 type MetricFacade struct {
 	client        *resty.Client
 	marshalerFunc func(v any) ([]byte, error)
@@ -17,6 +19,16 @@ type MetricFacade struct {
 	hashFunc      func(data []byte, key string) string
 }
 
+// NewMetricFacade создает новый экземпляр MetricFacade.
+//
+// client — HTTP-клиент (resty), который будет использоваться для отправки запросов.
+// marshalerFunc — функция сериализации метрик (например, json.Marshal).
+// hashFunc — функция хеширования тела запроса (например, HMAC).
+// serverAddress — адрес сервера, на который отправляются метрики (например, "localhost:8080").
+// key — секретный ключ для хеширования тела запроса.
+// header — имя заголовка, в который будет помещён хеш.
+//
+// Возвращает готовый к использованию *MetricFacade.
 func NewMetricFacade(
 	client *resty.Client,
 	marshalerFunc func(v any) ([]byte, error),
@@ -38,6 +50,13 @@ func NewMetricFacade(
 	}
 }
 
+// Updates отправляет срез метрик на сервер по эндпоинту "/updates/".
+// ctx — контекст для отмены или таймаута запроса.
+// metrics — срез метрик, сериализуемый и передаваемый в теле запроса.
+//
+// Если метрики не переданы, функция ничего не делает.
+// Возвращает ошибку, если не удалось сериализовать метрики,
+// отправить запрос или если сервер вернул ошибку.
 func (mf *MetricFacade) Updates(
 	ctx context.Context,
 	metrics []types.Metrics,
@@ -69,6 +88,8 @@ func (mf *MetricFacade) Updates(
 	return nil
 }
 
+// setHashHeader добавляет в HTTP-запрос заголовок с хешем тела запроса.
+// Используется только если задан ключ и функция хеширования.
 func (mf *MetricFacade) setHashHeader(req *resty.Request, body []byte) {
 	if mf.key == "" || mf.hashFunc == nil {
 		return

@@ -7,11 +7,20 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricSaveDBRepository реализует сохранение метрик в базу данных.
 type MetricSaveDBRepository struct {
 	db         *sqlx.DB
 	txProvider func(ctx context.Context) *sqlx.Tx
 }
 
+// NewMetricSaveDBRepository создает новый репозиторий для сохранения метрик в БД.
+//
+// Параметры:
+//   - db: подключение к базе данных sqlx.DB.
+//   - txProvider: функция для получения транзакции из контекста.
+//
+// Возвращает:
+//   - указатель на MetricSaveDBRepository.
 func NewMetricSaveDBRepository(
 	db *sqlx.DB,
 	txProvider func(ctx context.Context) *sqlx.Tx,
@@ -22,6 +31,16 @@ func NewMetricSaveDBRepository(
 	}
 }
 
+// Save сохраняет метрику в базу данных.
+//
+// Если метрика с таким же id и типом уже существует, данные обновляются.
+//
+// Параметры:
+//   - ctx: контекст выполнения запроса.
+//   - metric: структура метрики для сохранения.
+//
+// Возвращает:
+//   - ошибку, если сохранение прошло неуспешно.
 func (r *MetricSaveDBRepository) Save(
 	ctx context.Context, metric types.Metrics,
 ) error {

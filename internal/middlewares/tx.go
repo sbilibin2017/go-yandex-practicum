@@ -8,6 +8,20 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/tx"
 )
 
+// TxMiddleware — HTTP middleware, оборачивающий обработчики в SQL-транзакцию.
+//
+// Транзакция создаётся перед вызовом обработчика и коммитится по завершению,
+// либо откатывается при возникновении ошибки.
+//
+// Использует переданную функцию withTxFunc для управления жизненным циклом транзакции.
+//
+// Параметры:
+//   - db: *sqlx.DB — пул соединений к базе данных
+//   - withTxFunc: функция, запускающая выполнение в транзакции (см. internal/tx.WithTx)
+//
+// Пример использования:
+//
+//	http.Handle("/", TxMiddleware(db, tx.WithTx)(handler))
 func TxMiddleware(
 	db *sqlx.DB,
 	withTxFunc func(

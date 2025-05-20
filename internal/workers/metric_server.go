@@ -9,22 +9,42 @@ import (
 	"go.uber.org/zap"
 )
 
+// MetricSaveRepository описывает интерфейс для сохранения метрики в память или базу данных.
 type MetricSaveRepository interface {
+	// Save сохраняет переданную метрику.
 	Save(ctx context.Context, metric types.Metrics) error
 }
 
+// MetricListAllRepository описывает интерфейс для получения всех метрик из памяти или базы данных.
 type MetricListAllRepository interface {
+	// ListAll возвращает список всех метрик.
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
+// MetricSaveFileRepository описывает интерфейс для сохранения метрики в файл.
 type MetricSaveFileRepository interface {
+	// Save сохраняет метрику в файл.
 	Save(ctx context.Context, metric types.Metrics) error
 }
 
+// MetricListAllFileRepository описывает интерфейс для получения всех метрик из файла.
 type MetricListAllFileRepository interface {
+	// ListAll возвращает список всех метрик из файла.
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
+// NewMetricServerWorker создаёт функцию-воркер, которая управляет
+// периодическим сохранением метрик из памяти в файл и восстановлением метрик из файла.
+// Параметры:
+//   - ctx: контекст для отмены работы воркера,
+//   - memoryListAll: репозиторий для чтения всех метрик из памяти,
+//   - memorySave: репозиторий для сохранения метрик в память,
+//   - fileListAll: репозиторий для чтения метрик из файла,
+//   - fileSave: репозиторий для сохранения метрик в файл,
+//   - restore: флаг, указывающий, нужно ли восстанавливать метрики из файла при старте,
+//   - storeInterval: интервал в секундах для периодического сохранения метрик в файл.
+//
+// Если storeInterval равен 0, сохранение происходит только при завершении работы.
 func NewMetricServerWorker(
 	ctx context.Context,
 	memoryListAll MetricListAllRepository,
@@ -47,6 +67,8 @@ func NewMetricServerWorker(
 	}
 }
 
+// startMetricServerWorker запускает основной цикл работы воркера, который
+// восстанавливает метрики из файла, а затем периодически сохраняет их обратно.
 func startMetricServerWorker(
 	ctx context.Context,
 	memoryListAll MetricListAllRepository,
@@ -91,6 +113,8 @@ func startMetricServerWorker(
 	}
 }
 
+// saveMetricsToFile сохраняет все метрики из памяти в файл.
+// Возвращает ошибку в случае неудачи.
 func saveMetricsToFile(
 	ctx context.Context,
 	metricListAllMemoryRepository MetricListAllRepository,
@@ -110,6 +134,8 @@ func saveMetricsToFile(
 	return nil
 }
 
+// loadMetricsFromFile загружает все метрики из файла и сохраняет их в память.
+// Возвращает ошибку в случае неудачи.
 func loadMetricsFromFile(
 	ctx context.Context,
 	metricListAllFileRepository MetricListAllFileRepository,

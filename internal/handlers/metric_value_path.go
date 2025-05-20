@@ -8,10 +8,16 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
+// MetricGetPathService описывает сервис для получения метрики по ID,
+// где ID и тип метрики передаются через параметры URL.
 type MetricGetPathService interface {
+	// Get возвращает метрику по её ID или ошибку.
 	Get(ctx context.Context, metricID types.MetricID) (*types.Metrics, error)
 }
 
+// NewMetricGetPathHandler создаёт HTTP-обработчик для получения метрики,
+// где ID и тип метрики берутся из параметров URL.
+// Возвращает значение метрики в виде строки или ошибку.
 func NewMetricGetPathHandler(
 	svc MetricGetPathService,
 ) http.HandlerFunc {
@@ -49,6 +55,8 @@ func NewMetricGetPathHandler(
 	}
 }
 
+// newMetricStringValue конвертирует метрику в строковое представление
+// для типа счетчика (Counter) или показателя (Gauge).
 func newMetricStringValue(m types.Metrics) string {
 	var value string
 	if m.Type == types.CounterMetricType {

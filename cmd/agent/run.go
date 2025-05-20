@@ -14,6 +14,9 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 )
 
+// run инициализирует логгер, HTTP-клиент, метрик фасад и запускает воркер метрик,
+// который опрашивает метрики и отправляет их на сервер с заданными интервалами.
+// Контекст отмены создаётся при получении системных сигналов SIGINT или SIGTERM.
 func run() error {
 	if err := logger.Initialize(logLevel); err != nil {
 		return err

@@ -11,6 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// DBRetryMiddleware возвращает HTTP middleware, который оборачивает обработчик в логику повторных попыток (retry).
+//
+// Использует переданную функцию withRetry для управления повторами вызова обработчика.
+//
+// Аргументы:
+//   - withRetry: функция выполнения с retry (например, retrier.WithRetry).
+//   - attempts: срез интервалов между попытками.
+//   - isRetriableErrorFuncs: опциональные функции, определяющие, является ли ошибка повторяемой.
+//
+// Поведение:
+//   - Если внутри обработчика произошла ошибка или паника, будет предпринята повторная попытка.
+//   - Ответ, сгенерированный в последней попытке, будет записан в http.ResponseWriter.
+//   - Если все попытки неудачны, в лог будет записана ошибка и возвращён последний ответ.
 func DBRetryMiddleware(
 	withRetry func(
 		ctx context.Context,
@@ -70,18 +83,24 @@ func DBRetryMiddleware(
 	}
 }
 
+// responseBufferWriter — вспомогательная структура, реализующая http.ResponseWriter,
+// но буферизующая тело ответа в памяти, чтобы его можно было переиспользовать между попытками.
+//
+// Используется внутри DBRetryMiddleware.
 type responseBufferWriter struct {
 	http.ResponseWriter
-	buf         *bytes.Buffer
-	statusCode  int
-	wroteHeader bool
+	buf         *bytes.Buffer // буфер для тела ответа
+	statusCode  int           // код статуса, если был установлен
+	wroteHeader bool          // признак, что заголовок был записан
 }
 
+// WriteHeader сохраняет HTTP статус, но не отправляет его немедленно.
 func (w *responseBufferWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 	w.wroteHeader = true
 }
 
+// Write записывает тело ответа в буфер, не отправляя его клиенту напрямую.
 func (w *responseBufferWriter) Write(data []byte) (int, error) {
 	return w.buf.Write(data)
 }
