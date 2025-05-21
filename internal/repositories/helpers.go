@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 )
 
 // withFileSync выполняет синхронизацию файла до и после вызова функции fn.
@@ -52,9 +53,8 @@ type namedPreparer interface {
 func getExecutor(
 	ctx context.Context,
 	db *sqlx.DB,
-	txGetter func(ctx context.Context) *sqlx.Tx,
 ) namedPreparer {
-	if tx := txGetter(ctx); tx != nil {
+	if tx := middlewares.GetTx(ctx); tx != nil {
 		return tx
 	}
 	return db

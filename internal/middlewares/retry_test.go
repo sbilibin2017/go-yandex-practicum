@@ -189,17 +189,3 @@ func TestIsRetriableError(t *testing.T) {
 		})
 	}
 }
-
-// Вспомогательные типы для имитации net.Error
-
-type timeoutNetError struct{}
-
-func (*timeoutNetError) Error() string   { return "timeout error" }
-func (*timeoutNetError) Timeout() bool   { return true }
-func (*timeoutNetError) Temporary() bool { return false }
-
-type temporaryNetError struct{}
-
-func (*temporaryNetError) Error() string   { return "temporary error" }
-func (*temporaryNetError) Timeout() bool   { return false }
-func (*temporaryNetError) Temporary() bool { return true }

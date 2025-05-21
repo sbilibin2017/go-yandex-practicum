@@ -23,11 +23,9 @@ type MetricSaveDBRepository struct {
 //   - указатель на MetricSaveDBRepository.
 func NewMetricSaveDBRepository(
 	db *sqlx.DB,
-	txProvider func(ctx context.Context) *sqlx.Tx,
 ) *MetricSaveDBRepository {
 	return &MetricSaveDBRepository{
-		db:         db,
-		txProvider: txProvider,
+		db: db,
 	}
 }
 
@@ -51,7 +49,7 @@ func (r *MetricSaveDBRepository) Save(
 		"value": metric.Value,
 	}
 
-	executor := getExecutor(ctx, r.db, r.txProvider)
+	executor := getExecutor(ctx, r.db)
 
 	stmt, err := executor.PrepareNamedContext(ctx, metricSaveQuery)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,11 +34,15 @@ func setupMetricDBListAllTestDB(t *testing.T) (*sqlx.DB, func()) {
 		Started:          true,
 	})
 	require.NoError(t, err)
+
 	host, err := container.Host(ctx)
 	require.NoError(t, err)
+
 	port, err := container.MappedPort(ctx, "5432")
 	require.NoError(t, err)
+
 	dsn := fmt.Sprintf("postgres://testuser:testpass@%s:%s/testdb?sslmode=disable", host, port.Port())
+
 	var db *sqlx.DB
 	for i := 0; i < 10; i++ {
 		db, err = sqlx.Open("pgx", dsn)
@@ -48,6 +53,7 @@ func setupMetricDBListAllTestDB(t *testing.T) (*sqlx.DB, func()) {
 	}
 	require.NoError(t, err)
 	require.NotNil(t, db)
+
 	schema := `
 	CREATE SCHEMA IF NOT EXISTS content;
 	CREATE TABLE IF NOT EXISTS content.metrics (
@@ -59,6 +65,7 @@ func setupMetricDBListAllTestDB(t *testing.T) (*sqlx.DB, func()) {
 	);`
 	_, err = db.Exec(schema)
 	require.NoError(t, err)
+
 	cleanup := func() {
 		if db != nil {
 			_ = db.Close()
@@ -74,34 +81,23 @@ func TestMetricListAllDBRepository_ListAll(t *testing.T) {
 	db, cleanup := setupMetricDBListAllTestDB(t)
 	defer cleanup()
 
-	ptrFloat64 := func(v float64) *float64 {
-		return &v
-	}
+	ptrFloat64 := func(v float64) *float64 { return &v }
 
-	repo := NewMetricListAllDBRepository(db, func(ctx context.Context) *sqlx.Tx {
-		return nil
-	})
+	repo := NewMetricListAllDBRepository(db) // убрали nil
 
 	metrics := []types.Metrics{
 		{
-			MetricID: types.MetricID{
-				ID:   "test_metric_1",
-				Type: types.GaugeMetricType,
-			},
-			Delta: nil,
-			Value: ptrFloat64(42.5),
+			MetricID: types.MetricID{ID: "test_metric_1", Type: types.GaugeMetricType},
+			Delta:    nil,
+			Value:    ptrFloat64(42.5),
 		},
 		{
-			MetricID: types.MetricID{
-				ID:   "test_metric_2",
-				Type: types.GaugeMetricType,
-			},
-			Delta: nil,
-			Value: ptrFloat64(100.5),
+			MetricID: types.MetricID{ID: "test_metric_2", Type: types.GaugeMetricType},
+			Delta:    nil,
+			Value:    ptrFloat64(100.5),
 		},
 	}
 
-	// Вставка данных в базу с использованием именованных параметров
 	for _, metric := range metrics {
 		_, err := db.NamedExec(`INSERT INTO content.metrics (id, type, delta, value) VALUES (:id, :type, :delta, :value)`,
 			map[string]interface{}{
@@ -117,10 +113,54 @@ func TestMetricListAllDBRepository_ListAll(t *testing.T) {
 	metricList, err := repo.ListAll(ctx)
 	require.NoError(t, err)
 
-	// Проверка, что количество метрик соответствует
 	assert.Len(t, metricList, len(metrics))
-
-	// Проверка, что метрики отсортированы по ID
 	assert.Equal(t, "test_metric_1", metricList[0].ID)
 	assert.Equal(t, "test_metric_2", metricList[1].ID)
+}
+
+func TestMetricListAllDBRepository_ListAll_WithTx(t *testing.T) {
+	db, cleanup := setupMetricDBListAllTestDB(t)
+	defer cleanup()
+
+	ptrFloat64 := func(v float64) *float64 { return &v }
+
+	repo := NewMetricListAllDBRepository(db)
+
+	metrics := []types.Metrics{
+		{
+			MetricID: types.MetricID{ID: "test_metric_tx_1", Type: types.GaugeMetricType},
+			Delta:    nil,
+			Value:    ptrFloat64(11.1),
+		},
+		{
+			MetricID: types.MetricID{ID: "test_metric_tx_2", Type: types.GaugeMetricType},
+			Delta:    nil,
+			Value:    ptrFloat64(22.2),
+		},
+	}
+
+	for _, metric := range metrics {
+		_, err := db.NamedExec(`INSERT INTO content.metrics (id, type, delta, value) VALUES (:id, :type, :delta, :value)`,
+			map[string]interface{}{
+				"id":    metric.ID,
+				"type":  metric.Type,
+				"delta": metric.Delta,
+				"value": metric.Value,
+			})
+		require.NoError(t, err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.Beginx()
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ctx = middlewares.SetTx(ctx, tx) // предполагается, что getExecutor читает транзакцию из контекста
+
+	metricList, err := repo.ListAll(ctx)
+	require.NoError(t, err)
+
+	assert.Len(t, metricList, len(metrics))
+	assert.Equal(t, "test_metric_tx_1", metricList[0].ID)
+	assert.Equal(t, "test_metric_tx_2", metricList[1].ID)
 }

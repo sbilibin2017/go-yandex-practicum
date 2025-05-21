@@ -7,13 +7,10 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func TxMiddleware(
-	db *sqlx.DB,
-	txSetter func(ctx context.Context, tx *sqlx.Tx) context.Context,
-) func(next http.Handler) http.Handler {
+func TxMiddleware(db *sqlx.DB) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if db == nil || txSetter == nil {
+			if db == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -26,7 +23,7 @@ func TxMiddleware(
 				return
 			}
 
-			ctx = txSetter(ctx, tx)
+			ctx = SetTx(ctx, tx)
 			r = r.WithContext(ctx)
 
 			next.ServeHTTP(w, r)
@@ -38,4 +35,15 @@ func TxMiddleware(
 			}
 		})
 	}
+}
+
+type txContextKey struct{}
+
+func SetTx(ctx context.Context, tx *sqlx.Tx) context.Context {
+	return context.WithValue(ctx, txContextKey{}, tx)
+}
+
+func GetTx(ctx context.Context) *sqlx.Tx {
+	tx, _ := ctx.Value(txContextKey{}).(*sqlx.Tx)
+	return tx
 }
