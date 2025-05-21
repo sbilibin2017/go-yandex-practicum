@@ -4,55 +4,83 @@ import (
 	"flag"
 	"os"
 	"strconv"
-	"time"
+)
+
+const (
+	flagAddressName       = "a"
+	flagDatabaseDSNName   = "d"
+	flagStoreIntervalName = "i"
+	flagFilePathName      = "f"
+	flagRestoreName       = "r"
+	flagKeyName           = "k"
+
+	envAddress       = "ADDRESS"
+	envDatabaseDSN   = "DATABASE_DSN"
+	envStoreInterval = "STORE_INTERVAL"
+	envFilePath      = "FILE_STORAGE_PATH"
+	envRestore       = "RESTORE"
+	envKey           = "KEY"
+
+	defaultAddress       = ":8080"
+	defaultDatabaseDSN   = ""
+	defaultStoreInterval = 300
+	defaultFilePath      = ""
+	defaultRestore       = false
+	defaultKey           = ""
+
+	descAddress       = "address and port to run server"
+	descDatabaseDSN   = "dsn for database connection"
+	descStoreInterval = "interval (in seconds) to store data"
+	descFilePath      = "path to store files"
+	descRestore       = "whether to restore data from backup"
+	descKey           = "key used for SHA256 hashing"
+)
+
+const (
+	hashKeyHeader = "HashSHA256"
+	logLevel      = "info"
+	emptyString   = ""
 )
 
 var (
-	serverAddress   string
-	databaseDSN     string
-	storeInterval   int
-	fileStoragePath string
-	restore         bool
-	key             string
-	header          string
-	logLevel        string
-	attempts        []time.Duration
+	flagServerAddress   string
+	flagDatabaseDSN     string
+	flagStoreInterval   int
+	flagFileStoragePath string
+	flagRestore         bool
+	flagKey             string
 )
 
 func parseFlags() {
-	flag.StringVar(&serverAddress, "a", ":8080", "address and port to run server")
-	flag.StringVar(&databaseDSN, "d", "", "DSN (Data Source Name) for database connection")
-	flag.IntVar(&storeInterval, "i", 300, "interval (in seconds) to store data")
-	flag.StringVar(&fileStoragePath, "f", "", "path to store files")
-	flag.BoolVar(&restore, "r", false, "whether to restore data from backup")
-	flag.StringVar(&key, "k", "", "key used for SHA256 hashing")
+	flag.StringVar(&flagServerAddress, flagAddressName, defaultAddress, descAddress)
+	flag.StringVar(&flagDatabaseDSN, flagDatabaseDSNName, defaultDatabaseDSN, descDatabaseDSN)
+	flag.IntVar(&flagStoreInterval, flagStoreIntervalName, defaultStoreInterval, descStoreInterval)
+	flag.StringVar(&flagFileStoragePath, flagFilePathName, defaultFilePath, descFilePath)
+	flag.BoolVar(&flagRestore, flagRestoreName, defaultRestore, descRestore)
+	flag.StringVar(&flagKey, flagKeyName, defaultKey, descKey)
 
 	flag.Parse()
 
-	if env := os.Getenv("ADDRESS"); env != "" {
-		serverAddress = env
+	if env := os.Getenv(envAddress); env != emptyString {
+		flagServerAddress = env
 	}
-	if env := os.Getenv("DATABASE_DSN"); env != "" {
-		databaseDSN = env
+	if env := os.Getenv(envDatabaseDSN); env != emptyString {
+		flagDatabaseDSN = env
 	}
-	if env := os.Getenv("STORE_INTERVAL"); env != "" {
+	if env := os.Getenv(envStoreInterval); env != emptyString {
 		if v, err := strconv.Atoi(env); err == nil {
-			storeInterval = v
+			flagStoreInterval = v
 		}
 	}
-	if env := os.Getenv("FILE_STORAGE_PATH"); env != "" {
-		fileStoragePath = env
+	if env := os.Getenv(envFilePath); env != emptyString {
+		flagFileStoragePath = env
 	}
-	if env := os.Getenv("RESTORE"); env != "" {
+	if env := os.Getenv(envRestore); env != emptyString {
 		if v, err := strconv.ParseBool(env); err == nil {
-			restore = v
+			flagRestore = v
 		}
 	}
-	if env := os.Getenv("KEY"); env != "" {
-		key = env
+	if env := os.Getenv(envKey); env != emptyString {
+		flagKey = env
 	}
-
-	header = "HashSHA256"
-	logLevel = "info"
-	attempts = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 }

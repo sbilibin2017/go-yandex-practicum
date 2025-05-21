@@ -10,12 +10,12 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func setupMetricDBSaveTestDB(t *testing.T) (*sqlx.DB, func()) {
@@ -90,9 +90,7 @@ func TestMetricSaveDBRepository_Save(t *testing.T) {
 		return &v
 	}
 
-	repo := NewMetricSaveDBRepository(db, func(ctx context.Context) *sqlx.Tx {
-		return nil
-	})
+	repo := NewMetricSaveDBRepository(db) // убрал лишний параметр
 
 	metric := types.Metrics{
 		MetricID: types.MetricID{
@@ -107,7 +105,6 @@ func TestMetricSaveDBRepository_Save(t *testing.T) {
 	err := repo.Save(ctx, metric)
 	require.NoError(t, err)
 
-	// Проверка: SELECT с использованием именованных параметров для sqlx
 	var result struct {
 		Value float64 `db:"value"`
 	}

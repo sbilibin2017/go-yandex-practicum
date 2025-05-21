@@ -6,49 +6,75 @@ import (
 	"strconv"
 )
 
+const (
+	flagAddressName        = "a"
+	flagPollIntervalName   = "p"
+	flagReportIntervalName = "r"
+	flagKeyName            = "k"
+	flagRateLimitName      = "l"
+
+	envAddress        = "ADDRESS"
+	envPollInterval   = "POLL_INTERVAL"
+	envReportInterval = "REPORT_INTERVAL"
+	envKey            = "KEY"
+	envRateLimit      = "RATE_LIMIT"
+
+	defaultAddress        = "http://localhost:8080"
+	defaultPollInterval   = 2
+	defaultReportInterval = 10
+	defaultKey            = ""
+	defaultRateLimit      = 0
+
+	descAddress        = "Metrics server address"
+	descPollInterval   = "Poll interval in seconds"
+	descReportInterval = "Report interval in seconds"
+	descKey            = "Key for HMAC SHA256 hash"
+	descRateLimit      = "Max number of concurrent outgoing requests"
+)
+
+const (
+	batchSize     = 100
+	logLevel      = "info"
+	hashKeyHeader = "HashSHA256"
+	emptyString   = ""
+)
+
 var (
-	serverAddress  string
-	pollInterval   int
-	reportInterval int
-	key            string
-	rateLimit      int
-	batchSize      int
-	logLevel       string
-	header         string
+	flagServerAddress  string
+	flagPollInterval   int
+	flagReportInterval int
+	flagKey            string
+	flagRateLimit      int
 )
 
 func parseFlags() {
-	flag.StringVar(&serverAddress, "a", "http://localhost:8080", "Metrics server address")
-	flag.IntVar(&pollInterval, "p", 2, "Poll interval in seconds")
-	flag.IntVar(&reportInterval, "r", 10, "Report interval in seconds")
-	flag.StringVar(&key, "k", "", "Key for HMAC SHA256 hash")
-	flag.IntVar(&rateLimit, "l", 0, "Max number of concurrent outgoing requests")
+	flag.StringVar(&flagServerAddress, flagAddressName, defaultAddress, descAddress)
+	flag.IntVar(&flagPollInterval, flagPollIntervalName, defaultPollInterval, descPollInterval)
+	flag.IntVar(&flagReportInterval, flagReportIntervalName, defaultReportInterval, descReportInterval)
+	flag.StringVar(&flagKey, flagKeyName, defaultKey, descKey)
+	flag.IntVar(&flagRateLimit, flagRateLimitName, defaultRateLimit, descRateLimit)
 
 	flag.Parse()
 
-	if env := os.Getenv("ADDRESS"); env != "" {
-		serverAddress = env
+	if env := os.Getenv(envAddress); env != emptyString {
+		flagServerAddress = env
 	}
-	if env := os.Getenv("POLL_INTERVAL"); env != "" {
+	if env := os.Getenv(envPollInterval); env != emptyString {
 		if v, err := strconv.Atoi(env); err == nil {
-			pollInterval = v
+			flagPollInterval = v
 		}
 	}
-	if env := os.Getenv("REPORT_INTERVAL"); env != "" {
+	if env := os.Getenv(envReportInterval); env != emptyString {
 		if v, err := strconv.Atoi(env); err == nil {
-			reportInterval = v
+			flagReportInterval = v
 		}
 	}
-	if env := os.Getenv("KEY"); env != "" {
-		key = env
+	if env := os.Getenv(envKey); env != emptyString {
+		flagKey = env
 	}
-	if env := os.Getenv("RATE_LIMIT"); env != "" {
+	if env := os.Getenv(envRateLimit); env != emptyString {
 		if v, err := strconv.Atoi(env); err == nil {
-			rateLimit = v
+			flagRateLimit = v
 		}
 	}
-
-	logLevel = "info"
-	header = "HashSHA256"
-	batchSize = 100
 }

@@ -9,8 +9,7 @@ import (
 
 // MetricGetByIDDBRepository представляет реализацию репозитория для получения метрики по идентификатору из базы данных.
 type MetricGetByIDDBRepository struct {
-	db       *sqlx.DB
-	txGetter func(ctx context.Context) *sqlx.Tx
+	db *sqlx.DB
 }
 
 // NewMetricGetByIDDBRepository создает новый экземпляр репозитория MetricGetByIDDBRepository.
@@ -19,11 +18,9 @@ type MetricGetByIDDBRepository struct {
 //   - txGetter: функция получения текущей транзакции из контекста.
 func NewMetricGetByIDDBRepository(
 	db *sqlx.DB,
-	txGetter func(ctx context.Context) *sqlx.Tx,
 ) *MetricGetByIDDBRepository {
 	return &MetricGetByIDDBRepository{
-		db:       db,
-		txGetter: txGetter,
+		db: db,
 	}
 }
 
@@ -45,7 +42,7 @@ func (r *MetricGetByIDDBRepository) GetByID(
 
 	var metric types.Metrics
 
-	executor := getExecutor(ctx, r.db, r.txGetter)
+	executor := getExecutor(ctx, r.db)
 
 	stmt, err := executor.PrepareNamedContext(ctx, metricGetByIDQuery)
 	if err != nil {

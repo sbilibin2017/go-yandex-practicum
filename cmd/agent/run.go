@@ -21,17 +21,17 @@ func run() error {
 
 	metricFacade := facades.NewMetricFacade(
 		client,
-		serverAddress,
-		header,
-		key,
+		flagServerAddress,
+		hashKeyHeader,
+		flagKey,
 	)
 
 	worker := workers.NewMetricAgentWorker(
 		metricFacade,
-		pollInterval,
-		reportInterval,
+		flagPollInterval,
+		flagReportInterval,
 		batchSize,
-		rateLimit,
+		flagRateLimit,
 	)
 
 	ctx, stop := signal.NotifyContext(

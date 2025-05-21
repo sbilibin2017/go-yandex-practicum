@@ -9,8 +9,7 @@ import (
 
 // MetricListAllDBRepository реализует репозиторий для получения всех метрик из базы данных.
 type MetricListAllDBRepository struct {
-	db         *sqlx.DB
-	txProvider func(ctx context.Context) *sqlx.Tx
+	db *sqlx.DB
 }
 
 // NewMetricListAllDBRepository создает новый экземпляр MetricListAllDBRepository.
@@ -23,11 +22,9 @@ type MetricListAllDBRepository struct {
 //   - указатель на созданный репозиторий.
 func NewMetricListAllDBRepository(
 	db *sqlx.DB,
-	txProvider func(ctx context.Context) *sqlx.Tx,
 ) *MetricListAllDBRepository {
 	return &MetricListAllDBRepository{
-		db:         db,
-		txProvider: txProvider,
+		db: db,
 	}
 }
 
@@ -42,7 +39,7 @@ func NewMetricListAllDBRepository(
 func (r *MetricListAllDBRepository) ListAll(
 	ctx context.Context,
 ) ([]types.Metrics, error) {
-	executor := getExecutor(ctx, r.db, r.txProvider)
+	executor := getExecutor(ctx, r.db)
 
 	stmt, err := executor.PrepareNamedContext(ctx, metricListAllQuery)
 	if err != nil {

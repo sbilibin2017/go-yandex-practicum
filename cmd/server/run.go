@@ -12,7 +12,6 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/pressly/goose"
 
-	"github.com/sbilibin2017/go-yandex-practicum/internal/contexts"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
@@ -34,8 +33,8 @@ func run() error {
 		file *os.File
 	)
 
-	if fileStoragePath != "" {
-		file, err = os.OpenFile(fileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
+	if flagFileStoragePath != "" {
+		file, err = os.OpenFile(flagFileStoragePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0666)
 		if err != nil {
 			return err
 		}
@@ -43,8 +42,8 @@ func run() error {
 	}
 
 	var db *sqlx.DB
-	if databaseDSN != "" {
-		db, err = sqlx.Open("pgx", databaseDSN)
+	if flagDatabaseDSN != "" {
+		db, err = sqlx.Open("pgx", flagDatabaseDSN)
 		if err != nil {
 			return err
 		}
@@ -65,9 +64,9 @@ func run() error {
 		metricListAllDBRepo *repositories.MetricListAllDBRepository
 	)
 	if db != nil {
-		metricSaveDBRepo = repositories.NewMetricSaveDBRepository(db, contexts.GetTx)
-		metricGetByIDDBRepo = repositories.NewMetricGetByIDDBRepository(db, contexts.GetTx)
-		metricListAllDBRepo = repositories.NewMetricListAllDBRepository(db, contexts.GetTx)
+		metricSaveDBRepo = repositories.NewMetricSaveDBRepository(db)
+		metricGetByIDDBRepo = repositories.NewMetricGetByIDDBRepository(db)
+		metricListAllDBRepo = repositories.NewMetricListAllDBRepository(db)
 	}
 
 	var (
@@ -127,9 +126,9 @@ func run() error {
 
 	metricMiddlewares := []func(next http.Handler) http.Handler{
 		middlewares.LoggingMiddleware,
-		middlewares.HashMiddleware(key, header),
+		middlewares.HashMiddleware(flagKey, hashKeyHeader),
 		middlewares.GzipMiddleware,
-		middlewares.TxMiddleware(db, contexts.SetTx),
+		middlewares.TxMiddleware(db),
 		middlewares.RetryMiddleware,
 	}
 
@@ -148,7 +147,7 @@ func run() error {
 	router.Mount("/", metricRouter)
 
 	server := &http.Server{
-		Addr:    serverAddress,
+		Addr:    flagServerAddress,
 		Handler: router,
 	}
 
@@ -159,8 +158,8 @@ func run() error {
 			metricSaveContextRepo,
 			metricListAllFileRepo,
 			metricSaveFileRepo,
-			restore,
-			storeInterval,
+			flagRestore,
+			flagStoreInterval,
 		)
 	}
 
