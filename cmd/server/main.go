@@ -2,8 +2,13 @@ package main
 
 func main() {
 	printBuildInfo()
-	parseFlags()
-	err := run()
+
+	err := parseFlags()
+	if err != nil {
+		panic(err)
+	}
+
+	err = run()
 	if err != nil {
 		panic(err)
 	}
