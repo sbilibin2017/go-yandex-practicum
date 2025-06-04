@@ -128,6 +128,7 @@ func run() error {
 		middlewares.LoggingMiddleware,
 		middlewares.HashMiddleware(flagKey, hashKeyHeader),
 		middlewares.GzipMiddleware,
+		middlewares.CryptoMiddleware(flagCryptoKey),
 		middlewares.TxMiddleware(db),
 		middlewares.RetryMiddleware,
 	}

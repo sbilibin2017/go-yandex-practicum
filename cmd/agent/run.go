@@ -19,12 +19,17 @@ func run() error {
 
 	client := resty.New()
 
-	metricFacade := facades.NewMetricFacade(
+	metricFacade, err := facades.NewMetricFacade(
 		client,
 		flagServerAddress,
 		hashKeyHeader,
 		flagKey,
+		flagCryptoKey,
 	)
+
+	if err != nil {
+		return err
+	}
 
 	worker := workers.NewMetricAgentWorker(
 		metricFacade,

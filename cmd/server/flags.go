@@ -13,6 +13,7 @@ const (
 	flagFilePathName      = "f"
 	flagRestoreName       = "r"
 	flagKeyName           = "k"
+	flagCryptoKeyName     = "crypto-key"
 
 	envAddress       = "ADDRESS"
 	envDatabaseDSN   = "DATABASE_DSN"
@@ -20,6 +21,7 @@ const (
 	envFilePath      = "FILE_STORAGE_PATH"
 	envRestore       = "RESTORE"
 	envKey           = "KEY"
+	envCryptoKey     = "CRYPTO_KEY"
 
 	defaultAddress       = ":8080"
 	defaultDatabaseDSN   = ""
@@ -27,6 +29,7 @@ const (
 	defaultFilePath      = ""
 	defaultRestore       = false
 	defaultKey           = ""
+	defaultCryptoKey     = ""
 
 	descAddress       = "address and port to run server"
 	descDatabaseDSN   = "dsn for database connection"
@@ -34,6 +37,7 @@ const (
 	descFilePath      = "path to store files"
 	descRestore       = "whether to restore data from backup"
 	descKey           = "key used for SHA256 hashing"
+	descCryptoKey     = "path to private key file for encryption"
 )
 
 const (
@@ -49,6 +53,7 @@ var (
 	flagFileStoragePath string
 	flagRestore         bool
 	flagKey             string
+	flagCryptoKey       string
 )
 
 func parseFlags() {
@@ -58,6 +63,7 @@ func parseFlags() {
 	flag.StringVar(&flagFileStoragePath, flagFilePathName, defaultFilePath, descFilePath)
 	flag.BoolVar(&flagRestore, flagRestoreName, defaultRestore, descRestore)
 	flag.StringVar(&flagKey, flagKeyName, defaultKey, descKey)
+	flag.StringVar(&flagCryptoKey, flagCryptoKeyName, defaultCryptoKey, descCryptoKey)
 
 	flag.Parse()
 
@@ -82,5 +88,8 @@ func parseFlags() {
 	}
 	if env := os.Getenv(envKey); env != emptyString {
 		flagKey = env
+	}
+	if env := os.Getenv(envCryptoKey); env != "" {
+		flagCryptoKey = env
 	}
 }
