@@ -3,10 +3,16 @@ package facades
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +25,8 @@ type MetricFacade struct {
 	serverAddress string
 	header        string
 	key           string
+	cryptoKeyPath string
+	publicKey     *rsa.PublicKey
 }
 
 func NewMetricFacade(
@@ -26,7 +34,8 @@ func NewMetricFacade(
 	serverAddress string,
 	header string,
 	key string,
-) *MetricFacade {
+	cryptoKeyPath string,
+) (*MetricFacade, error) {
 	if !strings.HasPrefix(serverAddress, "http://") && !strings.HasPrefix(serverAddress, "https://") {
 		serverAddress = "http://" + serverAddress
 	}
@@ -50,12 +59,23 @@ func NewMetricFacade(
 			}
 		})
 
+	var pubKey *rsa.PublicKey
+	var err error
+	if cryptoKeyPath != "" {
+		pubKey, err = loadPublicKey(cryptoKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load public key: %w", err)
+		}
+	}
+
 	return &MetricFacade{
 		client:        client,
 		serverAddress: serverAddress,
 		header:        header,
 		key:           key,
-	}
+		cryptoKeyPath: cryptoKeyPath,
+		publicKey:     pubKey,
+	}, nil
 }
 
 func (mf *MetricFacade) Updates(
@@ -71,20 +91,40 @@ func (mf *MetricFacade) Updates(
 		return err
 	}
 
-	req := mf.client.R().
+	var hashSum string
+	if mf.key != "" {
+		hashSum = calcBodyHashSum(bodyBytes, mf.key)
+	}
+
+	if mf.publicKey != nil {
+		bodyBytes, err = encryptBody(bodyBytes, mf.publicKey)
+		if err != nil {
+			return fmt.Errorf("failed to encrypt metrics payload: %w", err)
+		}
+	}
+
+	return sendRequest(mf.client, ctx, "/updates/", bodyBytes, mf.header, hashSum)
+}
+
+func sendRequest(
+	client *resty.Client,
+	ctx context.Context,
+	urlPath string,
+	body []byte,
+	headerName string,
+	hashSum string,
+) error {
+	req := client.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Accept-Encoding", "gzip").
-		SetBody(bodyBytes)
+		SetBody(body)
 
-	if mf.key != "" {
-		h := hmac.New(sha256.New, []byte(mf.key))
-		h.Write(bodyBytes)
-		hashSum := hex.EncodeToString(h.Sum(nil))
-		req.SetHeader(mf.header, hashSum)
+	if headerName != "" && hashSum != "" {
+		req.SetHeader(headerName, hashSum)
 	}
 
-	resp, err := req.Post("/updates/")
+	resp, err := req.Post(urlPath)
 	if err != nil {
 		return fmt.Errorf("failed to send metrics: %w", err)
 	}
@@ -92,4 +132,37 @@ func (mf *MetricFacade) Updates(
 		return fmt.Errorf("error response from server for metrics: %s", resp.String())
 	}
 	return nil
+}
+
+func calcBodyHashSum(body []byte, key string) string {
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func encryptBody(body []byte, pubKey *rsa.PublicKey) ([]byte, error) {
+	if pubKey == nil {
+		return body, nil
+	}
+	return rsa.EncryptOAEP(sha256.New(), rand.Reader, pubKey, body, nil)
+}
+
+func loadPublicKey(path string) (*rsa.PublicKey, error) {
+	keyData, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(keyData)
+	if block == nil || block.Type != "PUBLIC KEY" {
+		return nil, errors.New("invalid PEM block or type")
+	}
+	pubKeyInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	pubKey, ok := pubKeyInterface.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("not an RSA public key")
+	}
+	return pubKey, nil
 }
