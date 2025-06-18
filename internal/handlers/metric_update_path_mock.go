@@ -36,10 +36,10 @@ func (m *MockMetricUpdatePathService) EXPECT() *MockMetricUpdatePathServiceMockR
 }
 
 // Updates mocks base method.
-func (m *MockMetricUpdatePathService) Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error) {
+func (m *MockMetricUpdatePathService) Updates(ctx context.Context, metrics []*types.Metrics) ([]*types.Metrics, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Updates", ctx, metrics)
-	ret0, _ := ret[0].([]types.Metrics)
+	ret0, _ := ret[0].([]*types.Metrics)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

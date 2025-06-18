@@ -8,52 +8,48 @@ import (
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-// MetricUpdatesBodyService описывает сервис для обновления нескольких метрик, полученных из тела запроса.
 type MetricUpdatesBodyService interface {
-	// Updates принимает срез метрик, обновляет их и возвращает обновлённые метрики или ошибку.
-	Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error)
+	Updates(ctx context.Context, metrics []*types.Metrics) ([]*types.Metrics, error)
 }
 
-// NewMetricUpdatesBodyHandler создаёт HTTP-обработчик для обновления метрик из JSON-массива в теле запроса.
-// Валидирует данные, вызывает сервис обновления и возвращает обновлённые метрики в JSON-формате.
 func NewMetricUpdatesBodyHandler(
 	svc MetricUpdatesBodyService,
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var reqs []types.Metrics
+		defer r.Body.Close()
 
+		var reqs []*types.Metrics
 		if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
-			http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		defer r.Body.Close()
 
 		for _, req := range reqs {
 			if req.ID == "" {
-				http.Error(w, "Metric id is required", http.StatusNotFound)
+				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 
 			switch req.Type {
-			case types.CounterMetricType:
+			case types.Counter:
 				if req.Delta == nil {
-					http.Error(w, "Metric delta is required for counter", http.StatusBadRequest)
+					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-			case types.GaugeMetricType:
+			case types.Gauge:
 				if req.Value == nil {
-					http.Error(w, "Metric value is required for gauge", http.StatusBadRequest)
+					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
 			default:
-				http.Error(w, "Invalid metric type", http.StatusBadRequest)
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 		}
 
 		metricsUpdated, err := svc.Updates(r.Context(), reqs)
 		if err != nil {
-			http.Error(w, "Metric not updated", http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
@@ -61,7 +57,8 @@ func NewMetricUpdatesBodyHandler(
 		w.WriteHeader(http.StatusOK)
 
 		if err := json.NewEncoder(w).Encode(metricsUpdated); err != nil {
-			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}
 }

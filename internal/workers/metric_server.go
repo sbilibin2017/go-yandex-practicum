@@ -25,28 +25,7 @@ type MetricListAllFileRepository interface {
 	ListAll(ctx context.Context) ([]types.Metrics, error)
 }
 
-func NewMetricServerWorker(
-	memoryListAll MetricListAllRepository,
-	memorySave MetricSaveRepository,
-	fileListAll MetricListAllFileRepository,
-	fileSave MetricSaveFileRepository,
-	restore bool,
-	storeInterval int,
-) func(ctx context.Context) error {
-	return func(ctx context.Context) error {
-		return startMetricServerWorker(
-			ctx,
-			memoryListAll,
-			memorySave,
-			fileListAll,
-			fileSave,
-			restore,
-			storeInterval,
-		)
-	}
-}
-
-func startMetricServerWorker(
+func StartMetricServerWorker(
 	ctx context.Context,
 	memoryListAll MetricListAllRepository,
 	memorySave MetricSaveRepository,
@@ -57,7 +36,7 @@ func startMetricServerWorker(
 ) error {
 	if restore {
 		if err := loadMetricsFromFile(ctx, fileListAll, memorySave); err != nil {
-			logger.Log.Error("Failed to restore metrics", zap.Error(err))
+			logger.Log.Error(err)
 			return err
 		}
 	}
@@ -68,7 +47,7 @@ func startMetricServerWorker(
 		defer cancel()
 
 		if err := saveMetricsToFile(shutdownCtx, memoryListAll, fileSave); err != nil {
-			logger.Log.Error("Error saving metrics before shutdown", zap.Error(err))
+			logger.Log.Error(err)
 			return err
 		}
 		return nil
@@ -102,7 +81,7 @@ func saveMetricsToFile(
 	}
 	for _, metric := range metrics {
 		if err := metricSaveFileRepository.Save(ctx, metric); err != nil {
-			logger.Log.Error("Error saving metric to file", zap.Error(err))
+			logger.Log.Error(err)
 			return err
 		}
 	}
@@ -116,12 +95,12 @@ func loadMetricsFromFile(
 ) error {
 	metrics, err := metricListAllFileRepository.ListAll(ctx)
 	if err != nil {
-		logger.Log.Error("Error fetching metrics from file", zap.Error(err))
+		logger.Log.Error(err)
 		return err
 	}
 	for _, metric := range metrics {
 		if err := metricSaveMemoryRepository.Save(ctx, metric); err != nil {
-			logger.Log.Error("Error saving metric to memory", zap.Error(err))
+			logger.Log.Error(err)
 			return err
 		}
 	}

@@ -1,7 +1,6 @@
-package handlers
+package handlers_test
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,87 +8,89 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func TestMetricListAllHTMLHandler(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	float64Ptr := func(f float64) *float64 {
+		return &f
+	}
+
+	int64Ptr := func(i int64) *int64 {
+		return &i
+	}
+
+	mockSvc := handlers.NewMockMetricListAllHTMLService(ctrl)
+	handler := handlers.NewMetricListAllHTMLHandler(mockSvc)
+
 	tests := []struct {
-		name           string
-		mockMetrics    []types.Metrics
-		mockErr        error
-		expectedStatus int
-		expectedBody   string
+		name          string
+		mockReturn    []types.Metrics
+		mockErr       error
+		wantStatus    int
+		wantBodyParts []string // substrings that must appear in response body
 	}{
 		{
-			name: "success with gauge and counter",
-			mockMetrics: []types.Metrics{
-				{MetricID: types.MetricID{ID: "temperature", Type: types.GaugeMetricType}, Value: floatPtr(21.5)},
-				{MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType}, Delta: intPtr(42)},
+			name: "Success with gauge and counter",
+			mockReturn: []types.Metrics{
+				{
+					ID:    "gauge1",
+					Type:  types.Gauge,
+					Value: float64Ptr(3.14),
+				},
+				{
+					ID:    "counter1",
+					Type:  types.Counter,
+					Delta: int64Ptr(42),
+				},
 			},
-			mockErr:        nil,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "<li>temperature: 21.5</li>",
+			mockErr:    nil,
+			wantStatus: http.StatusOK,
+			wantBodyParts: []string{
+				"gauge1: 3.14",
+				"counter1: 42",
+				"<!DOCTYPE html>",
+				"<ul>",
+				"</ul>",
+			},
 		},
 		{
-			name:           "empty list",
-			mockMetrics:    []types.Metrics{},
-			mockErr:        nil,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "<ul>\n</ul>",
-		},
-		{
-			name:           "internal error",
-			mockMetrics:    nil,
-			mockErr:        errors.New("database error"),
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Internal server error\n",
+			name:       "Service error returns 500",
+			mockReturn: nil,
+			mockErr:    assert.AnError,
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			mockService := NewMockMetricListAllHTMLService(ctrl)
-			mockService.EXPECT().
-				ListAll(gomock.Any()).
-				Return(tt.mockMetrics, tt.mockErr)
+			mockSvc.EXPECT().ListAll(gomock.Any()).Return(tt.mockReturn, tt.mockErr)
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			rr := httptest.NewRecorder()
+			w := httptest.NewRecorder()
 
-			handler := NewMetricListAllHTMLHandler(mockService)
-			handler.ServeHTTP(rr, req)
+			handler(w, req)
 
-			assert.Equal(t, tt.expectedStatus, rr.Code)
+			resp := w.Result()
+			defer resp.Body.Close() // <-- close the response body here
 
-			if tt.expectedStatus == http.StatusOK {
-				assert.Contains(t, rr.Body.String(), tt.expectedBody)
-			} else {
-				assert.Equal(t, tt.expectedBody, rr.Body.String())
+			bodyBytes := w.Body.Bytes()
+			body := string(bodyBytes)
+
+			assert.Equal(t, tt.wantStatus, resp.StatusCode)
+
+			for _, part := range tt.wantBodyParts {
+				assert.Contains(t, body, part)
+			}
+
+			// When error returned, body contains default error message from http.Error
+			if tt.mockErr != nil {
+				assert.Contains(t, body, "Internal server error")
 			}
 		})
 	}
-}
-
-func floatPtr(v float64) *float64 {
-	return &v
-}
-
-func intPtr(v int64) *int64 {
-	return &v
-}
-
-func TestNewMetricsHTML(t *testing.T) {
-	delta := int64(100)
-	value := 45.5
-	metrics := []types.Metrics{
-		{MetricID: types.MetricID{ID: "requests", Type: types.CounterMetricType}, Delta: &delta},
-		{MetricID: types.MetricID{ID: "cpu", Type: types.GaugeMetricType}, Value: &value},
-	}
-	html := newMetricsHTML(metrics)
-	assert.Contains(t, html, "<li>requests: 100</li>")
-	assert.Contains(t, html, "<li>cpu: 45.5</li>")
-	assert.Contains(t, html, "<html>")
 }

@@ -30,3 +30,7 @@ func printBuildInfo() {
 	fmt.Printf("Build date: %s\n", buildDate)
 	fmt.Printf("Build commit: %s\n", buildCommit)
 }
+
+func init() {
+	printBuildInfo()
+}

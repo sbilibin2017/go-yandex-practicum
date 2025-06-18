@@ -40,25 +40,12 @@ func NewMetricGetService(
 	}
 }
 
-// Get возвращает метрику по её идентификатору.
-//
-// Параметры:
-//   - ctx: контекст выполнения.
-//   - metricID: идентификатор метрики для поиска.
-//
-// Возвращает:
-//   - найденную метрику.
-//   - ошибку types.ErrMetricNotFound, если метрика не найдена.
-//   - ошибку types.ErrMetricInternal, если произошла внутренняя ошибка.
 func (svc *MetricGetService) Get(
 	ctx context.Context, metricID types.MetricID,
 ) (*types.Metrics, error) {
 	currentMetric, err := svc.mfor.GetByID(ctx, metricID)
 	if err != nil {
-		return nil, types.ErrMetricInternal
-	}
-	if currentMetric == nil {
-		return nil, types.ErrMetricNotFound
+		return nil, err
 	}
 	return currentMetric, nil
 }

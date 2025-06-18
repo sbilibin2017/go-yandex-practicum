@@ -5,51 +5,52 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"go.uber.org/zap"
 )
 
-// GzipMiddleware — HTTP middleware, обеспечивающее поддержку gzip-сжатия для входящих и исходящих HTTP-запросов.
+// GzipMiddleware is an HTTP middleware that enables gzip compression and decompression.
 //
-// Поведение:
-//   - Если Content-Encoding запроса — "gzip", тело запроса распаковывается.
-//   - Если клиент поддерживает gzip (в заголовке Accept-Encoding), ответ сжимается и отсылается с заголовком Content-Encoding: gzip.
+// If the incoming request has a `Content-Encoding: gzip` header, the middleware
+// will automatically decompress the request body before passing it to the next handler.
 //
-// Используется для уменьшения объема передаваемых данных между клиентом и сервером.
+// If the request contains an `Accept-Encoding` header with "gzip", the response
+// will be compressed using gzip, and the `Content-Encoding: gzip` header will be added
+// to the response.
+//
+// If decompression fails, the middleware responds with HTTP status 400 (Bad Request).
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Распаковка тела запроса, если оно было сжато gzip
+		// Decompress the request body if it's gzipped
 		if r.Header.Get("Content-Encoding") == "gzip" {
-			gz, err := gzip.NewReader(r.Body)
+			gzReader, err := gzip.NewReader(r.Body)
 			if err != nil {
-				logger.Log.Error("Failed to read gzip data from request", zap.Error(err))
-				http.Error(w, "Failed to read gzip data", http.StatusInternalServerError)
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			defer gz.Close()
-			r.Body = gz
+			defer gzReader.Close()
+			r.Body = io.NopCloser(gzReader)
 		}
 
-		// Сжатие ответа, если клиент это поддерживает
+		// Compress the response if the client supports gzip
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			w.Header().Set("Content-Encoding", "gzip")
-			gz := gzip.NewWriter(w)
-			defer gz.Close()
-			w = &gzipResponseWriter{Writer: gz, ResponseWriter: w}
-		}
+			gzw := gzip.NewWriter(w)
+			defer gzw.Close()
 
-		next.ServeHTTP(w, r)
+			w.Header().Set("Content-Encoding", "gzip")
+			gzwResponseWriter := &gzipResponseWriter{Writer: gzw, ResponseWriter: w}
+			next.ServeHTTP(gzwResponseWriter, r)
+		} else {
+			next.ServeHTTP(w, r)
+		}
 	})
 }
 
-// gzipResponseWriter — обёртка над http.ResponseWriter, осуществляющая gzip-сжатие тела ответа.
+// gzipResponseWriter wraps an http.ResponseWriter and writes compressed data using gzip.Writer.
 type gzipResponseWriter struct {
-	http.ResponseWriter
-	Writer io.Writer
+	io.Writer           // gzip.Writer
+	http.ResponseWriter // original HTTP response writer
 }
 
-// Write реализует интерфейс http.ResponseWriter, сжимая данные перед их отправкой клиенту.
-func (grw *gzipResponseWriter) Write(p []byte) (n int, err error) {
-	return grw.Writer.Write(p)
+// Write writes the compressed response body using the underlying gzip.Writer.
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
 }

@@ -2,76 +2,83 @@ package services
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func TestMetricListAllService_ListAll(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := NewMockMetricListAllRepository(ctrl)
+	svc := NewMetricListAllService(mockRepo)
+	ctx := context.Background()
+
 	tests := []struct {
-		name     string
-		setup    func(mockRepo *MockMetricListAllRepository)
-		expected []types.Metrics
-		err      error
+		name          string
+		mockSetup     func()
+		expected      []types.Metrics
+		expectedError error
 	}{
 		{
-			name: "Success - returns metrics list",
-			setup: func(mockRepo *MockMetricListAllRepository) {
-				val := float64(42.0)
+			name: "returns list of metrics",
+			mockSetup: func() {
 				mockRepo.EXPECT().
-					ListAll(context.Background()).
+					ListAll(ctx).
 					Return([]types.Metrics{
-						{
-							MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
-							Value:    &val,
-						},
-					}, nil)
+						{ID: "metric1", Type: types.Counter},
+						{ID: "metric2", Type: types.Gauge},
+					}, nil).
+					Times(1)
 			},
 			expected: []types.Metrics{
-				{
-					MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
-					Value:    func() *float64 { v := 42.0; return &v }(),
-				},
+				{ID: "metric1", Type: types.Counter},
+				{ID: "metric2", Type: types.Gauge},
 			},
-			err: nil,
+			expectedError: nil,
 		},
 		{
-			name: "Empty list - returns nil, nil",
-			setup: func(mockRepo *MockMetricListAllRepository) {
+			name: "returns nil when no metrics",
+			mockSetup: func() {
 				mockRepo.EXPECT().
-					ListAll(context.Background()).
-					Return([]types.Metrics{}, nil)
+					ListAll(ctx).
+					Return([]types.Metrics{}, nil).
+					Times(1)
 			},
-			expected: nil,
-			err:      nil,
+			expected:      nil,
+			expectedError: nil,
 		},
 		{
-			name: "Repository error - returns ErrMetricInternal",
-			setup: func(mockRepo *MockMetricListAllRepository) {
+			name: "returns error from repo",
+			mockSetup: func() {
 				mockRepo.EXPECT().
-					ListAll(context.Background()).
-					Return(nil, assert.AnError)
+					ListAll(ctx).
+					Return(nil, errors.New("repo error")).
+					Times(1)
 			},
-			expected: nil,
-			err:      types.ErrMetricInternal,
+			expected:      nil,
+			expectedError: errors.New("repo error"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
+			tt.mockSetup()
 
-			mockRepo := NewMockMetricListAllRepository(ctrl)
-			tt.setup(mockRepo)
+			got, err := svc.ListAll(ctx)
 
-			svc := NewMetricListAllService(mockRepo)
-			result, err := svc.ListAll(context.Background())
-
-			assert.Equal(t, tt.err, err)
-			assert.Equal(t, tt.expected, result)
+			if tt.expectedError != nil {
+				assert.EqualError(t, err, tt.expectedError.Error())
+				assert.Nil(t, got)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, got)
+			}
 		})
 	}
 }

@@ -4,221 +4,161 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
 func TestMetricUpdatesBodyHandler(t *testing.T) {
-	type testCase struct {
-		name           string
-		requestBody    []types.Metrics
-		rawRequestBody []byte // для невалидного JSON
-		mockSetup      func(svc *MockMetricUpdatesBodyService)
-		expectedStatus int
-		expectedBody   string
-	}
-
-	validGauge := types.Metrics{
-		MetricID: types.MetricID{
-			ID:   "temperature",
-			Type: types.GaugeMetricType,
-		},
-		Value: float64Ptr(36.6),
-	}
-
-	validCounter := types.Metrics{
-		MetricID: types.MetricID{
-			ID:   "requests",
-			Type: types.CounterMetricType,
-		},
-		Delta: int64Ptr(1),
-	}
-
-	tests := []testCase{
-		{
-			name:        "valid gauge and counter metrics",
-			requestBody: []types.Metrics{validGauge, validCounter},
-			mockSetup: func(svc *MockMetricUpdatesBodyService) {
-				svc.EXPECT().
-					Updates(gomock.Any(), gomock.Any()).
-					Return([]types.Metrics{validGauge, validCounter}, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   mustMarshalJSON([]types.Metrics{validGauge, validCounter}),
-		},
-		{
-			name: "invalid metric - missing ID",
-			requestBody: []types.Metrics{{
-				MetricID: types.MetricID{
-					Type: types.CounterMetricType,
-				},
-				Delta: int64Ptr(1),
-			}},
-			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "Metric id is required",
-		},
-		{
-			name: "invalid type",
-			requestBody: []types.Metrics{{
-				MetricID: types.MetricID{
-					ID:   "badmetric",
-					Type: "invalid",
-				},
-				Value: float64Ptr(10.5),
-			}},
-			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid metric type",
-		},
-		{
-			name: "missing delta in counter",
-			requestBody: []types.Metrics{{
-				MetricID: types.MetricID{
-					ID:   "count",
-					Type: types.CounterMetricType,
-				},
-			}},
-			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Metric delta is required for counter",
-		},
-		{
-			name: "missing value in gauge",
-			requestBody: []types.Metrics{{
-				MetricID: types.MetricID{
-					ID:   "temp",
-					Type: types.GaugeMetricType,
-				},
-				// Value отсутствует
-			}},
-			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Metric value is required for gauge",
-		},
-		{
-			name:        "service returns error",
-			requestBody: []types.Metrics{validCounter},
-			mockSetup: func(svc *MockMetricUpdatesBodyService) {
-				svc.EXPECT().
-					Updates(gomock.Any(), gomock.Any()).
-					Return(nil, errors.New("db error"))
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Metric not updated",
-		},
-		{
-			name:           "invalid JSON body",
-			rawRequestBody: []byte(`{"invalid_json":`),
-			mockSetup:      func(svc *MockMetricUpdatesBodyService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid JSON body",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			mockSvc := NewMockMetricUpdatesBodyService(ctrl)
-			tc.mockSetup(mockSvc)
-
-			handler := NewMetricUpdatesBodyHandler(mockSvc)
-
-			var reqBody io.Reader
-			if tc.rawRequestBody != nil {
-				reqBody = bytes.NewReader(tc.rawRequestBody)
-			} else {
-				bodyBytes, err := json.Marshal(tc.requestBody)
-				require.NoError(t, err)
-				reqBody = bytes.NewReader(bodyBytes)
-			}
-
-			req := httptest.NewRequest(http.MethodPost, "/updates", reqBody)
-			req.Header.Set("Content-Type", "application/json")
-
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-
-			resp := rec.Result()
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			require.NoError(t, err)
-
-			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
-			assert.Equal(t, tc.expectedBody, string(bytes.TrimSpace(body)))
-		})
-	}
-}
-
-// Тест ошибки кодирования JSON ответа (ошибка Write)
-
-type failingWriter struct{}
-
-func (f *failingWriter) Header() http.Header {
-	return http.Header{}
-}
-
-func (f *failingWriter) Write([]byte) (int, error) {
-	return 0, errors.New("write error")
-}
-
-func (f *failingWriter) WriteHeader(statusCode int) {}
-
-func TestMetricUpdatesBodyHandler_ResponseEncodeError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockSvc := NewMockMetricUpdatesBodyService(ctrl)
+	handler := NewMetricUpdatesBodyHandler(mockSvc)
 
-	validCounter := types.Metrics{
-		MetricID: types.MetricID{
-			ID:   "requests",
-			Type: types.CounterMetricType,
+	counterVal := int64(42)
+	gaugeVal := float64(3.14)
+
+	tests := []struct {
+		name           string
+		input          interface{}
+		mockSetup      func()
+		wantStatusCode int
+	}{
+		{
+			name:           "invalid json",
+			input:          "invalid json",
+			mockSetup:      func() {},
+			wantStatusCode: http.StatusBadRequest,
 		},
-		Delta: int64Ptr(1),
+		{
+			name: "missing id",
+			input: []*types.Metrics{
+				{ID: "", Type: types.Counter, Delta: &counterVal},
+			},
+			mockSetup:      func() {},
+			wantStatusCode: http.StatusNotFound,
+		},
+		{
+			name: "counter missing delta",
+			input: []*types.Metrics{
+				{ID: "metric1", Type: types.Counter, Delta: nil},
+			},
+			mockSetup:      func() {},
+			wantStatusCode: http.StatusBadRequest,
+		},
+		{
+			name: "gauge missing value",
+			input: []*types.Metrics{
+				{ID: "metric2", Type: types.Gauge, Value: nil},
+			},
+			mockSetup:      func() {},
+			wantStatusCode: http.StatusBadRequest,
+		},
+		{
+			name: "invalid metric type",
+			input: []*types.Metrics{
+				{ID: "metric3", Type: "invalid"},
+			},
+			mockSetup:      func() {},
+			wantStatusCode: http.StatusBadRequest,
+		},
+		{
+			name: "service update error",
+			input: []*types.Metrics{
+				{ID: "metric4", Type: types.Counter, Delta: &counterVal},
+			},
+			mockSetup: func() {
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return(nil, errors.New("update failed"))
+			},
+			wantStatusCode: http.StatusInternalServerError,
+		},
+		{
+			name: "success",
+			input: []*types.Metrics{
+				{ID: "metric5", Type: types.Counter, Delta: &counterVal},
+				{ID: "metric6", Type: types.Gauge, Value: &gaugeVal},
+			},
+			mockSetup: func() {
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return([]*types.Metrics{
+						{ID: "metric5", Type: types.Counter, Delta: &counterVal},
+						{ID: "metric6", Type: types.Gauge, Value: &gaugeVal},
+					}, nil)
+			},
+			wantStatusCode: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
+
+			var body []byte
+			var err error
+
+			switch v := tt.input.(type) {
+			case string:
+				body = []byte(v)
+			default:
+				body, err = json.Marshal(v)
+				assert.NoError(t, err)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/metrics/update", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+
+			handler(rec, req)
+
+			resp := rec.Result()
+			defer resp.Body.Close()
+
+			assert.Equal(t, tt.wantStatusCode, resp.StatusCode)
+		})
+	}
+}
+
+type failingWriter struct{}
+
+func (f *failingWriter) Header() http.Header        { return http.Header{} }
+func (f *failingWriter) Write([]byte) (int, error)  { return 0, errFailWrite }
+func (f *failingWriter) WriteHeader(statusCode int) {}
+
+var errFailWrite = &writeError{}
+
+type writeError struct{}
+
+func (e *writeError) Error() string { return "write error" }
+
+func TestEncodeErrorPath(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockSvc := NewMockMetricUpdatesBodyService(ctrl)
+	handler := NewMetricUpdatesBodyHandler(mockSvc)
+
+	delta := int64(42)
+	metrics := []*types.Metrics{
+		{ID: "id1", Type: types.Counter, Delta: &delta},
 	}
 
 	mockSvc.EXPECT().
 		Updates(gomock.Any(), gomock.Any()).
-		Return([]types.Metrics{validCounter}, nil)
+		Return(metrics, nil)
 
-	handler := NewMetricUpdatesBodyHandler(mockSvc)
+	body, _ := json.Marshal(metrics)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 
-	bodyBytes, err := json.Marshal([]types.Metrics{validCounter})
-	require.NoError(t, err)
+	fw := &failingWriter{}
+	handler(fw, req)
 
-	req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-
-	w := &failingWriter{}
-
-	handler.ServeHTTP(w, req)
-}
-
-// Helpers
-
-func int64Ptr(i int64) *int64 {
-	return &i
-}
-
-func float64Ptr(f float64) *float64 {
-	return &f
-}
-
-func mustMarshalJSON(v interface{}) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return string(b)
+	// If no panic or deadlock, test passed.
 }

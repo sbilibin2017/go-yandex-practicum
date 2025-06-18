@@ -1,14 +1,9 @@
 package main
 
+import "context"
+
 func main() {
-	printBuildInfo()
-
-	err := parseFlags()
-	if err != nil {
-		panic(err)
-	}
-
-	err = run()
+	err := run(context.Background())
 	if err != nil {
 		panic(err)
 	}
