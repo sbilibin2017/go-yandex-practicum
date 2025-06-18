@@ -23,36 +23,27 @@ func NewMetricListAllHTMLHandler(svc MetricListAllHTMLService) http.HandlerFunc 
 			return
 		}
 
-		// Формируем HTML с помощью отдельной функции
-		metricsHTML := newMetricsHTML(metrics)
+		var builder strings.Builder
+		builder.WriteString("<!DOCTYPE html><html><head><title>Metrics</title></head><body><ul>\n")
 
-		// Устанавливаем заголовок и пишем тело ответа
+		for _, m := range metrics {
+			switch m.Type {
+			case types.Gauge:
+				if m.Value != nil {
+					builder.WriteString(fmt.Sprintf("<li>%s: %v</li>\n", m.ID, *m.Value))
+				}
+			case types.Counter:
+				if m.Delta != nil {
+					builder.WriteString(fmt.Sprintf("<li>%s: %d</li>\n", m.ID, *m.Delta))
+				}
+			}
+		}
+
+		builder.WriteString("</ul></body></html>\n")
+		metricsHTML := builder.String()
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(metricsHTML))
 	}
-}
-
-// newMetricsHTML формирует HTML-страницу с перечислением метрик.
-// Метрики выводятся в виде списка <ul><li>.
-// Для Gauge выводится значение Value, для Counter — значение Delta.
-func newMetricsHTML(metrics []types.Metrics) string {
-	var builder strings.Builder
-	builder.WriteString("<!DOCTYPE html><html><head><title>Metrics</title></head><body><ul>\n")
-
-	for _, m := range metrics {
-		switch m.Type {
-		case types.GaugeMetricType:
-			if m.Value != nil {
-				builder.WriteString(fmt.Sprintf("<li>%s: %v</li>\n", m.ID, *m.Value))
-			}
-		case types.CounterMetricType:
-			if m.Delta != nil {
-				builder.WriteString(fmt.Sprintf("<li>%s: %d</li>\n", m.ID, *m.Delta))
-			}
-		}
-	}
-
-	builder.WriteString("</ul></body></html>\n")
-	return builder.String()
 }

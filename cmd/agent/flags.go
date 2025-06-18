@@ -2,52 +2,17 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/spf13/pflag"
 )
 
 const (
-	flagAddressName        = "a"
-	flagPollIntervalName   = "p"
-	flagReportIntervalName = "r"
-	flagKeyName            = "k"
-	flagRateLimitName      = "l"
-	flagCryptoKeyName      = "crypto-key"
-	flagConfigName         = "c"
-	flagConfigNameLong     = "config"
-
-	envAddress        = "ADDRESS"
-	envPollInterval   = "POLL_INTERVAL"
-	envReportInterval = "REPORT_INTERVAL"
-	envKey            = "KEY"
-	envRateLimit      = "RATE_LIMIT"
-	envCryptoKey      = "CRYPTO_KEY"
-	envConfig         = "CONFIG"
-
-	defaultAddress        = "http://localhost:8080"
-	defaultPollInterval   = 2
-	defaultReportInterval = 10
-	defaultKey            = ""
-	defaultRateLimit      = 0
-	defaultCryptoKey      = ""
-	defaultConfig         = ""
-
-	descAddress        = "Metrics server address"
-	descPollInterval   = "Poll interval in seconds"
-	descReportInterval = "Report interval in seconds"
-	descKey            = "Key for HMAC SHA256 hash"
-	descRateLimit      = "Max number of concurrent outgoing requests"
-	descCryptoKey      = "Path to public key file for encryption"
-	descConfig         = "Path to config file"
-)
-
-const (
-	batchSize     = 100
-	logLevel      = "info"
 	hashKeyHeader = "HashSHA256"
-	emptyString   = ""
+	logLevel      = "info"
+	batchSize     = 100
 )
 
 var (
@@ -60,86 +25,114 @@ var (
 	flagConfigPath     string
 )
 
-func parseFlags() error {
-	flag.StringVar(&flagServerAddress, flagAddressName, defaultAddress, descAddress)
-	flag.IntVar(&flagPollInterval, flagPollIntervalName, defaultPollInterval, descPollInterval)
-	flag.IntVar(&flagReportInterval, flagReportIntervalName, defaultReportInterval, descReportInterval)
-	flag.StringVar(&flagKey, flagKeyName, defaultKey, descKey)
-	flag.IntVar(&flagRateLimit, flagRateLimitName, defaultRateLimit, descRateLimit)
-	flag.StringVar(&flagCryptoKey, flagCryptoKeyName, defaultCryptoKey, descCryptoKey)
-	flag.StringVar(&flagConfigPath, flagConfigName, defaultConfig, descConfig)
-	flag.StringVar(&flagConfigPath, flagConfigNameLong, defaultConfig, descConfig)
-
-	flag.Parse()
-
-	err := loadConfigFile(flagConfigPath)
-
-	if err != nil {
-		return err
+func init() {
+	parseFlags()
+	if err := parseConfigFile(); err != nil {
+		panic(err)
 	}
+	parseEnv()
+}
 
-	if env := os.Getenv(envAddress); env != emptyString {
+func parseFlags() {
+	pflag.StringVarP(&flagServerAddress, "address", "a", "http://localhost:8080", "Metrics server address")
+	pflag.IntVarP(&flagPollInterval, "poll-interval", "p", 2, "Poll interval in seconds")
+	pflag.IntVarP(&flagReportInterval, "report-interval", "r", 10, "Report interval in seconds")
+	pflag.StringVarP(&flagKey, "key", "k", "", "Key for HMAC SHA256 hash")
+	pflag.IntVarP(&flagRateLimit, "rate-limit", "l", 0, "Max number of concurrent outgoing requests")
+	pflag.StringVar(&flagCryptoKey, "crypto-key", "", "Path to public key file for encryption")
+	pflag.StringVarP(&flagConfigPath, "config", "c", "", "Path to config file")
+
+	pflag.Parse()
+}
+
+func parseEnv() {
+	if env := os.Getenv("ADDRESS"); env != "" {
 		flagServerAddress = env
 	}
-	if env := os.Getenv(envPollInterval); env != emptyString {
+	if env := os.Getenv("POLL_INTERVAL"); env != "" {
 		if v, err := strconv.Atoi(env); err == nil {
 			flagPollInterval = v
 		}
 	}
-	if env := os.Getenv(envReportInterval); env != emptyString {
+	if env := os.Getenv("REPORT_INTERVAL"); env != "" {
 		if v, err := strconv.Atoi(env); err == nil {
 			flagReportInterval = v
 		}
 	}
-	if env := os.Getenv(envKey); env != emptyString {
+	if env := os.Getenv("KEY"); env != "" {
 		flagKey = env
 	}
-	if env := os.Getenv(envRateLimit); env != emptyString {
+	if env := os.Getenv("RATE_LIMIT"); env != "" {
 		if v, err := strconv.Atoi(env); err == nil {
 			flagRateLimit = v
 		}
 	}
-	if env := os.Getenv(envCryptoKey); env != "" {
+	if env := os.Getenv("CRYPTO_KEY"); env != "" {
 		flagCryptoKey = env
 	}
-
-	return nil
+	if env := os.Getenv("CONFIG"); env != "" {
+		flagConfigPath = env
+	}
 }
 
-func loadConfigFile(path string) error {
-	f, err := os.Open(path)
+func parseConfigFile() error {
+	if flagConfigPath == "" {
+		return nil
+	}
+
+	file, err := os.Open(flagConfigPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer file.Close()
 
 	var cfg struct {
 		Address        string `json:"address"`
 		ReportInterval string `json:"report_interval"`
 		PollInterval   string `json:"poll_interval"`
+		Key            string `json:"key"`
+		RateLimit      int    `json:"rate_limit"`
 		CryptoKey      string `json:"crypto_key"`
 	}
 
-	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
+	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
 		return err
 	}
 
-	if cfg.Address != "" {
+	if cfg.Address != "" && flagServerAddress == "http://localhost:8080" {
 		flagServerAddress = cfg.Address
 	}
-	if cfg.ReportInterval != "" {
-		if d, err := time.ParseDuration(cfg.ReportInterval); err == nil {
-			flagReportInterval = int(d.Seconds())
+	if cfg.ReportInterval != "" && flagReportInterval == 10 {
+		if d, err := parseDurationToSeconds(cfg.ReportInterval); err == nil {
+			flagReportInterval = d
 		}
 	}
-	if cfg.PollInterval != "" {
-		if d, err := time.ParseDuration(cfg.PollInterval); err == nil {
-			flagPollInterval = int(d.Seconds())
+	if cfg.PollInterval != "" && flagPollInterval == 2 {
+		if d, err := parseDurationToSeconds(cfg.PollInterval); err == nil {
+			flagPollInterval = d
 		}
 	}
-	if cfg.CryptoKey != "" {
+	if cfg.Key != "" && flagKey == "" {
+		flagKey = cfg.Key
+	}
+	if cfg.RateLimit != 0 && flagRateLimit == 0 {
+		flagRateLimit = cfg.RateLimit
+	}
+	if cfg.CryptoKey != "" && flagCryptoKey == "" {
 		flagCryptoKey = cfg.CryptoKey
 	}
 
 	return nil
+}
+
+func parseDurationToSeconds(dur string) (int, error) {
+	// Support both simple integer seconds or duration strings like "10s"
+	if seconds, err := strconv.Atoi(dur); err == nil {
+		return seconds, nil
+	}
+	parsed, err := time.ParseDuration(dur)
+	if err != nil {
+		return 0, err
+	}
+	return int(parsed.Seconds()), nil
 }

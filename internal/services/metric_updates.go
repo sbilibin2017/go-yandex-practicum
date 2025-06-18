@@ -73,79 +73,43 @@ func NewMetricUpdatesService(
 //   - обновленный список метрик.
 //   - ошибку types.ErrMetricInternal в случае внутренней ошибки.
 func (svc *MetricUpdatesService) Updates(
-	ctx context.Context, metrics []types.Metrics,
-) ([]types.Metrics, error) {
-	metrics, err := aggregateMetrics(metrics)
-	if err != nil {
-		return nil, types.ErrMetricInternal
-	}
+	ctx context.Context, metrics []*types.Metrics,
+) ([]*types.Metrics, error) {
+	updatedMetrics := make(map[types.MetricID]*types.Metrics)
+
 	for _, metric := range metrics {
-		strategy := metricUpdateStrategies[metric.Type]
-		currentMetric, err := svc.mfor.GetByID(ctx, metric.MetricID)
-		if err != nil {
-			return nil, types.ErrMetricInternal
-		}
-		if currentMetric != nil {
-			metric = strategy(*currentMetric, metric)
-		}
-		if err := svc.msr.Save(ctx, metric); err != nil {
-			return nil, types.ErrMetricInternal
-		}
-	}
-	return metrics, nil
-}
-
-// aggregateMetrics агрегирует входящие метрики по их ID, суммируя счетчики и обновляя показатели.
-//
-// Возвращает агрегированный список метрик или ошибку при неизвестном типе метрики.
-func aggregateMetrics(metrics []types.Metrics) ([]types.Metrics, error) {
-	metrcsMap := make(map[types.MetricID]types.Metrics)
-	for _, m := range metrics {
-		_, ok := metricUpdateStrategies[m.Type]
-		if !ok {
-			return nil, types.ErrMetricInternal
-		}
-		if existing, ok := metrcsMap[m.MetricID]; ok {
-			switch m.Type {
-			case types.CounterMetricType:
-				if existing.Delta != nil && m.Delta != nil {
-					sum := *existing.Delta + *m.Delta
-					existing.Delta = &sum
-				}
-			case types.GaugeMetricType:
-				existing.Value = m.Value
+		switch metric.Type {
+		case types.Counter:
+			currentMetric, err := svc.mfor.GetByID(ctx, types.MetricID{ID: metric.ID, Type: metric.Type})
+			if err != nil {
+				return nil, err
 			}
-			metrcsMap[m.MetricID] = existing
-		} else {
-			metrcsMap[m.MetricID] = m
+
+			var current int64
+			if currentMetric != nil && currentMetric.Delta != nil {
+				current = *currentMetric.Delta
+			}
+
+			if metric.Delta == nil {
+				var initialDelta int64 = 0
+				metric.Delta = &initialDelta
+			}
+
+			*metric.Delta += current
 		}
+
+		if err := svc.msr.Save(ctx, *metric); err != nil {
+			return nil, err
+		}
+
+		id := types.MetricID{ID: metric.ID, Type: metric.Type}
+		updatedMetrics[id] = metric
 	}
-	var metricsAggregated []types.Metrics
-	for _, m := range metrcsMap {
-		metricsAggregated = append(metricsAggregated, m)
+
+	result := make([]*types.Metrics, 0, len(updatedMetrics))
+	for _, metric := range updatedMetrics {
+		result = append(result, metric)
 	}
-	return metricsAggregated, nil
-}
 
-// metricUpdateStrategies — карта стратегий обновления метрик по типу.
-var metricUpdateStrategies = map[types.MetricType]func(
-	oldValue types.Metrics, newValue types.Metrics,
-) types.Metrics{
-	types.CounterMetricType: metricUpdateCounter,
-	types.GaugeMetricType:   metricUpdateGauge,
-}
-
-// metricUpdateCounter обновляет счетчик, суммируя старое и новое значения Delta.
-func metricUpdateCounter(
-	oldValue types.Metrics, newValue types.Metrics,
-) types.Metrics {
-	*newValue.Delta += *oldValue.Delta
-	return newValue
-}
-
-// metricUpdateGauge обновляет показатель Gauge, заменяя старое значение на новое.
-func metricUpdateGauge(
-	oldValue types.Metrics, newValue types.Metrics,
-) types.Metrics {
-	return newValue
+	return result, nil
 }

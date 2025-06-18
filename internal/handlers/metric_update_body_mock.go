@@ -36,10 +36,10 @@ func (m *MockMetricUpdateBodyService) EXPECT() *MockMetricUpdateBodyServiceMockR
 }
 
 // Updates mocks base method.
-func (m *MockMetricUpdateBodyService) Updates(ctx context.Context, metrics []types.Metrics) ([]types.Metrics, error) {
+func (m *MockMetricUpdateBodyService) Updates(ctx context.Context, metrics []*types.Metrics) ([]*types.Metrics, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Updates", ctx, metrics)
-	ret0, _ := ret[0].([]types.Metrics)
+	ret0, _ := ret[0].([]*types.Metrics)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

@@ -5,134 +5,111 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetricUpdatePathHandler(t *testing.T) {
-	type testCase struct {
-		name           string
-		urlPath        string
-		mockService    func(m *MockMetricUpdatePathService)
-		expectedStatus int
-		expectedBody   string
-	}
+func TestNewMetricUpdatePathHandler(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
 
-	tests := []testCase{
+	mockSvc := NewMockMetricUpdatePathService(ctrl)
+	handler := NewMetricUpdatePathHandler(mockSvc)
+
+	tests := []struct {
+		name           string
+		query          string
+		mockSetup      func()
+		expectedStatus int
+	}{
 		{
-			name:    "valid counter metric",
-			urlPath: "/update/counter/ops/100",
-			mockService: func(m *MockMetricUpdatePathService) {
-				delta := int64(100)
-				m.EXPECT().
-					Updates(gomock.Any(), []types.Metrics{
-						{
-							MetricID: types.MetricID{ID: "ops", Type: types.CounterMetricType},
-							Delta:    &delta,
-						},
-					}).
-					Return(nil, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "Metric updated successfully",
+			name:           "Missing name param",
+			query:          "type=counter&value=10",
+			mockSetup:      func() {},
+			expectedStatus: http.StatusNotFound,
 		},
 		{
-			name:    "valid gauge metric",
-			urlPath: "/update/gauge/load/3.14",
-			mockService: func(m *MockMetricUpdatePathService) {
-				value := 3.14
-				m.EXPECT().
-					Updates(gomock.Any(), []types.Metrics{
-						{
-							MetricID: types.MetricID{ID: "load", Type: types.GaugeMetricType},
-							Value:    &value,
-						},
-					}).
-					Return(nil, nil)
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   "Metric updated successfully",
-		},
-		{
-			name:           "invalid metric type",
-			urlPath:        "/update/unknown/test/42",
-			mockService:    nil,
+			name:           "Missing value param",
+			query:          "name=metric1&type=counter",
+			mockSetup:      func() {},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid metric type\n",
 		},
 		{
-			name:           "invalid counter value",
-			urlPath:        "/update/counter/test/abc",
-			mockService:    nil,
+			name:           "Invalid counter value",
+			query:          "name=metric1&type=counter&value=notint",
+			mockSetup:      func() {},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid metric value for counter\n",
 		},
 		{
-			name:           "invalid gauge value",
-			urlPath:        "/update/gauge/test/abc",
-			mockService:    nil,
+			name:           "Invalid gauge value",
+			query:          "name=metric1&type=gauge&value=notfloat",
+			mockSetup:      func() {},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Invalid metric value for gauge\n",
 		},
 		{
-			name:    "internal error",
-			urlPath: "/update/counter/test/1",
-			mockService: func(m *MockMetricUpdatePathService) {
-				delta := int64(1)
-				m.EXPECT().
-					Updates(gomock.Any(), []types.Metrics{
-						{
-							MetricID: types.MetricID{ID: "test", Type: types.CounterMetricType},
-							Delta:    &delta,
-						},
-					}).
+			name:           "Invalid metric type",
+			query:          "name=metric1&type=invalid&value=123",
+			mockSetup:      func() {},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:  "Service returns error",
+			query: "name=metric1&type=counter&value=123",
+			mockSetup: func() {
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
 					Return(nil, assert.AnError)
 			},
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Metric not updated\n",
 		},
 		{
-			name:           "missing metric name",
-			urlPath:        "/update/counter//100", // пустое имя
-			mockService:    nil,
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "Metric name is required\n",
+			name:  "Successful update counter",
+			query: "name=metric1&type=counter&value=123",
+			mockSetup: func() {
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), []*types.Metrics{
+						{
+							ID:    "metric1",
+							Type:  types.Counter,
+							Delta: func() *int64 { v := int64(123); return &v }(),
+						},
+					}).
+					Return(nil, nil)
+			},
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:           "missing metric value",
-			urlPath:        "/update/counter/ops", // пустое значение
-			mockService:    nil,
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "Metric value is required\n",
+			name:  "Successful update gauge",
+			query: "name=metric1&type=gauge&value=123.45",
+			mockSetup: func() {
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), []*types.Metrics{
+						{
+							ID:    "metric1",
+							Type:  types.Gauge,
+							Value: func() *float64 { v := 123.45; return &v }(),
+						},
+					}).
+					Return(nil, nil)
+			},
+			expectedStatus: http.StatusOK,
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.mockSetup()
 
-			mockService := NewMockMetricUpdatePathService(ctrl)
-			if tc.mockService != nil {
-				tc.mockService(mockService)
-			}
+			req := httptest.NewRequest(http.MethodPost, "/update?"+tt.query, nil)
+			rec := httptest.NewRecorder()
 
-			router := chi.NewRouter()
-			router.Post("/update/{type}/{name}/{value}", NewMetricUpdatePathHandler(mockService))
-			router.Post("/update/{type}/{name}", NewMetricUpdatePathHandler(mockService))
+			handler.ServeHTTP(rec, req)
 
-			req := httptest.NewRequest(http.MethodPost, tc.urlPath, nil)
-			w := httptest.NewRecorder()
+			res := rec.Result()
+			defer res.Body.Close()
 
-			router.ServeHTTP(w, req)
-
-			resp := w.Result()
-			defer resp.Body.Close()
-
-			assert.Equal(t, tc.expectedStatus, resp.StatusCode)
-
+			assert.Equal(t, tt.expectedStatus, res.StatusCode)
 		})
 	}
 }

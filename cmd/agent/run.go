@@ -5,51 +5,69 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/go-resty/resty/v2"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/facades"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/runners"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/workers"
 )
 
-func run() error {
+// Declare startMetricAgentFunc with exact signature as StartMetricAgent
+var startMetricAgentFunc = func(
+	ctx context.Context,
+	serverAddress string,
+	header string,
+	key string,
+	cryptoKeyPath string,
+	pollInterval int,
+	reportInterval int,
+	batchSize int,
+	rateLimit int,
+) error {
+	return workers.StartMetricAgent(
+		ctx,
+		serverAddress,
+		header,
+		key,
+		cryptoKeyPath,
+		pollInterval,
+		reportInterval,
+		batchSize,
+		rateLimit,
+	)
+}
+
+func run(ctx context.Context) error {
 	if err := logger.Initialize(logLevel); err != nil {
 		return err
 	}
 
-	client := resty.New()
-
-	metricFacade, err := facades.NewMetricFacade(
-		client,
-		flagServerAddress,
-		hashKeyHeader,
-		flagKey,
-		flagCryptoKey,
-	)
-
-	if err != nil {
-		return err
-	}
-
-	worker := workers.NewMetricAgentWorker(
-		metricFacade,
-		flagPollInterval,
-		flagReportInterval,
-		batchSize,
-		flagRateLimit,
-	)
-
 	ctx, stop := signal.NotifyContext(
-		context.Background(),
+		ctx,
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT,
 	)
 	defer stop()
 
-	if err := runners.RunWorker(ctx, worker); err != nil {
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- startMetricAgentFunc(
+			ctx,
+			flagServerAddress,
+			hashKeyHeader,
+			flagKey,
+			flagCryptoKey,
+			flagPollInterval,
+			flagReportInterval,
+			batchSize,
+			flagRateLimit,
+		)
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Graceful shutdown
+		return nil
+	case err := <-errCh:
 		return err
 	}
-
-	return nil
 }

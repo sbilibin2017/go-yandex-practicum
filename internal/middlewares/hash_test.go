@@ -38,11 +38,12 @@ func TestHashMiddleware_BodyReadError(t *testing.T) {
 	resp := w.Result()
 	defer resp.Body.Close()
 
+	// Body will be empty now, since middleware does not write error message
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	assert.Contains(t, string(respBody), "Failed to read request body")
+	assert.Len(t, respBody, 0, "response body should be empty on body read error")
 }
 
 func TestHashMiddleware_EmptyKey_ReturnsNext(t *testing.T) {
@@ -63,7 +64,7 @@ func TestHashMiddleware_EmptyKey_ReturnsNext(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close() // ✅ Добавлено для предотвращения утечки
+	defer resp.Body.Close()
 
 	assert.True(t, called, "Next handler should be called")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -158,5 +159,5 @@ func TestHashMiddleware_InvalidHash(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	assert.Contains(t, string(respBody), "Hash mismatch")
+	assert.Len(t, respBody, 0, "response body should be empty on hash mismatch")
 }

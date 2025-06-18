@@ -2,6 +2,7 @@ package middlewares
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -11,69 +12,100 @@ import (
 	"github.com/jackc/pgconn"
 )
 
-// bufferedResponseWriter буферизует ответ для возможности повторной попытки
-type bufferedResponseWriter struct {
-	headers    http.Header
-	statusCode int
-	buf        bytes.Buffer
-	err        error
+// BufferedResponseWriter buffers the response and captures an error.
+type BufferedResponseWriter struct {
+	headers     http.Header
+	body        *bytes.Buffer
+	statusCode  int
+	wroteHeader bool
+	err         error
 }
 
-func newBufferedResponseWriter() *bufferedResponseWriter {
-	return &bufferedResponseWriter{
+func NewBufferedResponseWriter() *BufferedResponseWriter {
+	return &BufferedResponseWriter{
 		headers:    make(http.Header),
+		body:       new(bytes.Buffer),
 		statusCode: http.StatusOK,
 	}
 }
 
-func (b *bufferedResponseWriter) Header() http.Header {
-	return b.headers
+func (brw *BufferedResponseWriter) Header() http.Header {
+	return brw.headers
 }
 
-func (b *bufferedResponseWriter) WriteHeader(statusCode int) {
-	b.statusCode = statusCode
+func (brw *BufferedResponseWriter) Write(b []byte) (int, error) {
+	return brw.body.Write(b)
 }
 
-func (b *bufferedResponseWriter) Write(data []byte) (int, error) {
-	// Можно симулировать ошибку записи, например, через поле err
-	if b.err != nil {
-		return 0, b.err
+func (brw *BufferedResponseWriter) WriteHeader(statusCode int) {
+	if brw.wroteHeader {
+		return
 	}
-	return b.buf.Write(data)
+	brw.statusCode = statusCode
+	brw.wroteHeader = true
 }
 
-func (b *bufferedResponseWriter) flushTo(w http.ResponseWriter) {
-	for k, v := range b.headers {
-		for _, vv := range v {
-			w.Header().Add(k, vv)
+// SetError lets handler set an error that middleware will inspect for retries.
+func (brw *BufferedResponseWriter) SetError(err error) {
+	brw.err = err
+}
+
+// flushTo writes buffered headers, status and body to real ResponseWriter.
+func (brw *BufferedResponseWriter) flushTo(w http.ResponseWriter) {
+	for k, vv := range brw.headers {
+		for _, v := range vv {
+			w.Header().Add(k, v)
 		}
 	}
-	w.WriteHeader(b.statusCode)
-	w.Write(b.buf.Bytes())
+	w.WriteHeader(brw.statusCode)
+	w.Write(brw.body.Bytes())
 }
 
 func RetryMiddleware(next http.Handler) http.Handler {
+	const maxAttempts = 4
+	delays := []time.Duration{0, time.Second, 3 * time.Second, 5 * time.Second}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		const maxAttempts = 4
-		delays := []time.Duration{0, time.Second, 3 * time.Second, 5 * time.Second}
+		var brw *BufferedResponseWriter
 
-		for attempt := 1; attempt <= maxAttempts; attempt++ {
-			if attempt > 1 {
-				time.Sleep(delays[attempt-1])
-			}
-
-			brw := newBufferedResponseWriter()
+		err := withRetry(r.Context(), maxAttempts, delays, func() error {
+			brw = NewBufferedResponseWriter()
 
 			next.ServeHTTP(brw, r)
 
-			if brw.err == nil && !isRetriableError(brw.err) {
-				brw.flushTo(w)
-				return
+			if isRetriableError(brw.err) {
+				return brw.err
 			}
+			return nil
+		})
+
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
 		}
 
-		http.Error(w, "Maximum retry attempts exceeded", http.StatusServiceUnavailable)
+		brw.flushTo(w)
 	})
+}
+
+func withRetry(ctx context.Context, maxAttempts int, delays []time.Duration, fn func() error) error {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if attempt == maxAttempts {
+			return err
+		}
+		if attempt-1 < len(delays) {
+			select {
+			case <-time.After(delays[attempt-1]):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return nil
 }
 
 func isRetriableError(err error) bool {
@@ -82,15 +114,11 @@ func isRetriableError(err error) bool {
 	}
 
 	if pgErr, ok := err.(*pgconn.PgError); ok {
-		if strings.HasPrefix(pgErr.Code, "08") {
-			return true
-		}
+		return strings.HasPrefix(pgErr.Code, "08")
 	}
 
 	if pathErr, ok := err.(*os.PathError); ok {
-		if pathErr.Err == syscall.EAGAIN || pathErr.Err == syscall.EWOULDBLOCK {
-			return true
-		}
+		return pathErr.Err == syscall.EAGAIN || pathErr.Err == syscall.EWOULDBLOCK
 	}
 
 	return false

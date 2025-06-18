@@ -20,7 +20,7 @@ func HashMiddleware(
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
-				http.Error(w, "Failed to read request body", http.StatusBadRequest)
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 			r.Body.Close()
@@ -34,7 +34,7 @@ func HashMiddleware(
 				expectedHash := hex.EncodeToString(expectedMAC)
 
 				if !hmac.Equal([]byte(receivedHash), []byte(expectedHash)) {
-					http.Error(w, "Hash mismatch", http.StatusBadRequest)
+					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
 			}

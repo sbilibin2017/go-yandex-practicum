@@ -1,3 +1,4 @@
+// Package middlewares provides middleware components for HTTP servers.
 package middlewares
 
 import (
@@ -8,61 +9,59 @@ import (
 	"go.uber.org/zap"
 )
 
-// LoggingMiddleware — HTTP middleware, логирующий информацию о каждом запросе и ответе.
+// LoggingMiddleware is an HTTP middleware that logs incoming requests and outgoing responses.
 //
-// Логирует:
-//   - URI и метод запроса
-//   - Время выполнения запроса (duration)
-//   - HTTP-статус ответа
-//   - Размер тела ответа (в байтах)
+// For each request, it logs the HTTP method, URI, and processing duration.
+// For each response, it logs the status code and the size of the response body.
 //
-// Пример использования:
-//
-//	http.Handle("/", LoggingMiddleware(myHandler))
+// The logging is done using the zap logger from the internal logger package.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
-		rw := &responseWriter{
-			ResponseWriter: w,
-			statusCode:     http.StatusOK,
-		}
+		rw := newResponseWriter(w)
 
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
 
-		logger.Log.Info("Request info",
-			zap.String("uri", r.RequestURI),
+		logger.Log.Desugar().Info("Request",
 			zap.String("method", r.Method),
+			zap.String("uri", r.RequestURI),
 			zap.Duration("duration", duration),
 		)
 
-		logger.Log.Info("Response info",
+		logger.Log.Desugar().Info("Response",
 			zap.Int("status", rw.statusCode),
-			zap.Int("size", rw.size),
+			zap.Int("response_size", rw.writtenSize),
 		)
 	})
 }
 
-// responseWriter — обёртка над http.ResponseWriter для перехвата статуса и размера ответа.
-//
-// Используется в LoggingMiddleware для логирования информации об ответе.
+// responseWriter is a custom implementation of http.ResponseWriter
+// that captures the response status code and the number of bytes written.
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode int // HTTP-статус ответа
-	size       int // Объём тела ответа в байтах
+	statusCode  int // HTTP status code
+	writtenSize int // total bytes written to the response body
 }
 
-// WriteHeader сохраняет статус ответа и передаёт его оригинальному ResponseWriter.
+// newResponseWriter creates and returns a new wrapped responseWriter instance.
+func newResponseWriter(w http.ResponseWriter) *responseWriter {
+	return &responseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+	}
+}
+
+// WriteHeader captures the status code and delegates to the original ResponseWriter.
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Write записывает тело ответа и сохраняет его размер.
+// Write writes the data to the response body and updates the written size.
 func (rw *responseWriter) Write(b []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(b)
-	rw.size += n
+	rw.writtenSize += n
 	return n, err
 }

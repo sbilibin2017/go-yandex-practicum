@@ -7,293 +7,255 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
-	"github.com/stretchr/testify/require"
-
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
-func Test_loadMetricsFromFile_SaveError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockListAllFile := NewMockMetricListAllFileRepository(ctrl)
-	mockSaveMemory := NewMockMetricSaveRepository(ctrl)
-
-	ctx := context.Background()
-	metric := types.Metrics{
-		MetricID: types.MetricID{ID: "test_metric", Type: types.CounterMetricType},
-	}
-
-	expectedErr := errors.New("mocked Save error")
-
-	mockListAllFile.EXPECT().
-		ListAll(ctx).
-		Return([]types.Metrics{metric}, nil)
-
-	mockSaveMemory.EXPECT().
-		Save(ctx, metric).
-		Return(expectedErr)
-
-	err := loadMetricsFromFile(ctx, mockListAllFile, mockSaveMemory)
-	require.Error(t, err)
-	require.Equal(t, expectedErr, err)
-}
-
-func Test_saveMetricsToFile_ListAllError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	mockListAll := NewMockMetricListAllRepository(ctrl)
-	mockSaveFile := NewMockMetricSaveFileRepository(ctrl)
-
-	ctx := context.Background()
-	expectedErr := errors.New("mocked ListAll error")
-
-	mockListAll.EXPECT().
-		ListAll(ctx).
-		Return(nil, expectedErr)
-
-	err := saveMetricsToFile(ctx, mockListAll, mockSaveFile)
-	require.Error(t, err)
-	require.Equal(t, expectedErr, err)
-}
-
-func Test_startMetricServerWorker_StoreInterval_SaveError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	storeInterval := 1
-
-	mockMemList := NewMockMetricListAllRepository(ctrl)
-	mockFileSave := NewMockMetricSaveFileRepository(ctrl)
-
-	expectedErr := errors.New("save failed")
-
-	mockMemList.EXPECT().
-		ListAll(gomock.Any()).
-		Return([]types.Metrics{{MetricID: types.MetricID{ID: "fail", Type: types.CounterMetricType}}}, nil)
-
-	mockFileSave.EXPECT().
-		Save(gomock.Any(), gomock.Any()).
-		Return(expectedErr)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	start := time.Now()
-	err := startMetricServerWorker(
-		ctx,
-		mockMemList,
-		nil,
-		nil,
-		mockFileSave,
-		false,
-		storeInterval,
-	)
-	require.Error(t, err)
-	require.Equal(t, expectedErr, err)
-	require.WithinDuration(t, start.Add(time.Second), time.Now(), 2*time.Second, "Should fail shortly after ticker fires")
-}
-
-func Test_startMetricServerWorker_StoreIntervalSaveCalled(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	storeInterval := 1
-
-	mockMemList := NewMockMetricListAllRepository(ctrl)
-	mockFileSave := NewMockMetricSaveFileRepository(ctrl)
-
-	var delta int64 = 100
-	testMetric := types.Metrics{
-		MetricID: types.MetricID{ID: "test_metric", Type: types.CounterMetricType},
-		Delta:    &delta,
-	}
-
-	mockMemList.EXPECT().
-		ListAll(gomock.Any()).
-		MinTimes(1).
-		Return([]types.Metrics{testMetric}, nil)
-
-	mockFileSave.EXPECT().
-		Save(gomock.Any(), testMetric).
-		MinTimes(1).
-		Return(nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(1500 * time.Millisecond)
-		cancel()
-	}()
-
-	err := startMetricServerWorker(
-		ctx,
-		mockMemList,
-		nil,
-		nil,
-		mockFileSave,
-		false,
-		storeInterval,
-	)
-	require.NoError(t, err)
-}
-
-func TestStartMetricServerWorker_RestoreMetricsSuccess(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	restore := true
-	storeInterval := 0
-
-	mockFileList := NewMockMetricListAllFileRepository(ctrl)
-	mockMemSave := NewMockMetricSaveRepository(ctrl)
-	mockMemList := NewMockMetricListAllRepository(ctrl)
-	mockFileSave := NewMockMetricSaveFileRepository(ctrl)
-
-	var delta int64 = 10
-	metric := types.Metrics{
-		MetricID: types.MetricID{ID: "test_counter", Type: types.CounterMetricType},
-		Delta:    &delta,
-	}
-
-	mockFileList.EXPECT().
-		ListAll(gomock.Any()).
-		Return([]types.Metrics{metric}, nil)
-
-	mockMemSave.EXPECT().
-		Save(gomock.Any(), metric).
-		Return(nil)
-
-	mockMemList.EXPECT().
-		ListAll(gomock.Any()).
-		Return([]types.Metrics{metric}, nil)
-
-	mockFileSave.EXPECT().
-		Save(gomock.Any(), metric).
-		Return(nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := NewMetricServerWorker(
-		mockMemList,
-		mockMemSave,
-		mockFileList,
-		mockFileSave,
-		restore,
-		storeInterval,
-	)(ctx)
-
-	require.NoError(t, err)
-}
-
-func TestStartMetricServerWorker_StoreOnShutdown(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	storeInterval := 0
-
-	mockMemList := NewMockMetricListAllRepository(ctrl)
-	mockFileSave := NewMockMetricSaveFileRepository(ctrl)
-
-	var delta int64 = 42
-
-	mockMemList.EXPECT().
-		ListAll(gomock.Any()).
-		Return([]types.Metrics{
-			{
-				MetricID: types.MetricID{ID: "shutdown_metric", Type: types.CounterMetricType},
-				Delta:    &delta,
+func Test_loadMetricsFromFile(t *testing.T) {
+	tests := []struct {
+		name          string
+		mockListAll   func(m *MockMetricListAllFileRepository, ctx context.Context, metric types.Metrics, err error)
+		mockSave      func(m *MockMetricSaveRepository, ctx context.Context, metric types.Metrics, err error)
+		expectedError error
+	}{
+		{
+			name: "success",
+			mockListAll: func(m *MockMetricListAllFileRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().ListAll(ctx).Return([]types.Metrics{metric}, nil)
 			},
-		}, nil)
-
-	mockFileSave.EXPECT().
-		Save(gomock.Any(), gomock.Any()).
-		Return(nil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-
-	err := NewMetricServerWorker(
-		mockMemList,
-		nil,
-		nil,
-		mockFileSave,
-		false,
-		storeInterval,
-	)(ctx)
-
-	require.NoError(t, err)
-}
-
-func TestStartMetricServerWorker_RestoreFails(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	restore := true
-	storeInterval := 0
-
-	mockFileList := NewMockMetricListAllFileRepository(ctrl)
-
-	mockFileList.EXPECT().
-		ListAll(gomock.Any()).
-		Return(nil, errors.New("restore failed"))
-
-	err := NewMetricServerWorker(
-		nil,
-		nil,
-		mockFileList,
-		nil,
-		restore,
-		storeInterval,
-	)(context.Background())
-
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "restore failed")
-}
-
-func TestStartMetricServerWorker_SaveFails(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	storeInterval := 0
-
-	mockMemList := NewMockMetricListAllRepository(ctrl)
-	mockFileSave := NewMockMetricSaveFileRepository(ctrl)
-
-	var delta int64 = 99
-
-	mockMemList.EXPECT().
-		ListAll(gomock.Any()).
-		Return([]types.Metrics{
-			{
-				MetricID: types.MetricID{ID: "fail_metric", Type: types.CounterMetricType},
-				Delta:    &delta,
+			mockSave: func(m *MockMetricSaveRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().Save(ctx, metric).Return(nil)
 			},
-		}, nil)
+			expectedError: nil,
+		},
+		{
+			name: "listall error",
+			mockListAll: func(m *MockMetricListAllFileRepository, ctx context.Context, _ types.Metrics, err error) {
+				m.EXPECT().ListAll(ctx).Return(nil, err)
+			},
+			mockSave:      func(m *MockMetricSaveRepository, ctx context.Context, metric types.Metrics, err error) {},
+			expectedError: errors.New("listall error"),
+		},
+		{
+			name: "save error",
+			mockListAll: func(m *MockMetricListAllFileRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().ListAll(ctx).Return([]types.Metrics{metric}, nil)
+			},
+			mockSave: func(m *MockMetricSaveRepository, ctx context.Context, metric types.Metrics, err error) {
+				m.EXPECT().Save(ctx, metric).Return(err)
+			},
+			expectedError: errors.New("save error"),
+		},
+	}
 
-	mockFileSave.EXPECT().
-		Save(gomock.Any(), gomock.Any()).
-		Return(errors.New("save failed"))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
+			ctx := context.Background()
 
-	err := NewMetricServerWorker(
-		mockMemList,
-		nil,
-		nil,
-		mockFileSave,
-		false,
-		storeInterval,
-	)(ctx)
+			var delta int64 = 123
+			testMetric := types.Metrics{
+				ID:    "metric1",
+				Type:  types.Counter,
+				Delta: &delta,
+			}
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "save failed")
+			mockList := NewMockMetricListAllFileRepository(ctrl)
+			mockSave := NewMockMetricSaveRepository(ctrl)
+
+			tt.mockListAll(mockList, ctx, testMetric, tt.expectedError)
+			tt.mockSave(mockSave, ctx, testMetric, tt.expectedError)
+
+			err := loadMetricsFromFile(ctx, mockList, mockSave)
+			if tt.expectedError != nil {
+				require.Error(t, err)
+				require.EqualError(t, err, tt.expectedError.Error())
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func Test_saveMetricsToFile(t *testing.T) {
+	tests := []struct {
+		name          string
+		mockListAll   func(m *MockMetricListAllRepository, ctx context.Context, metric types.Metrics, err error)
+		mockSave      func(m *MockMetricSaveFileRepository, ctx context.Context, metric types.Metrics, err error)
+		expectedError error
+	}{
+		{
+			name: "success",
+			mockListAll: func(m *MockMetricListAllRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().ListAll(ctx).Return([]types.Metrics{metric}, nil)
+			},
+			mockSave: func(m *MockMetricSaveFileRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().Save(ctx, metric).Return(nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name: "listall error",
+			mockListAll: func(m *MockMetricListAllRepository, ctx context.Context, _ types.Metrics, err error) {
+				m.EXPECT().ListAll(ctx).Return(nil, err)
+			},
+			mockSave:      func(m *MockMetricSaveFileRepository, ctx context.Context, metric types.Metrics, err error) {},
+			expectedError: errors.New("listall error"),
+		},
+		{
+			name: "save error",
+			mockListAll: func(m *MockMetricListAllRepository, ctx context.Context, metric types.Metrics, _ error) {
+				m.EXPECT().ListAll(ctx).Return([]types.Metrics{metric}, nil)
+			},
+			mockSave: func(m *MockMetricSaveFileRepository, ctx context.Context, metric types.Metrics, err error) {
+				m.EXPECT().Save(ctx, metric).Return(err)
+			},
+			expectedError: errors.New("save error"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			ctx := context.Background()
+
+			value := 3.14 // type float64 omitted here
+
+			testMetric := types.Metrics{
+				ID:    "metric2",
+				Type:  types.Gauge,
+				Value: &value,
+			}
+
+			mockList := NewMockMetricListAllRepository(ctrl)
+			mockSave := NewMockMetricSaveFileRepository(ctrl)
+
+			tt.mockListAll(mockList, ctx, testMetric, tt.expectedError)
+			tt.mockSave(mockSave, ctx, testMetric, tt.expectedError)
+
+			err := saveMetricsToFile(ctx, mockList, mockSave)
+			if tt.expectedError != nil {
+				require.Error(t, err)
+				require.EqualError(t, err, tt.expectedError.Error())
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestStartMetricServerWorker(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	metric := types.Metrics{
+		ID:   "metric1",
+		Type: types.Counter,
+		Delta: func() *int64 {
+			v := int64(10)
+			return &v
+		}(),
+	}
+
+	tests := []struct {
+		name          string
+		restore       bool
+		storeInterval int
+		mockSetup     func(
+			mListAll *MockMetricListAllRepository,
+			mSave *MockMetricSaveRepository,
+			fListAll *MockMetricListAllFileRepository,
+			fSave *MockMetricSaveFileRepository,
+		)
+		expectErr bool
+	}{
+		{
+			name:          "Restore success, store interval zero (wait shutdown save success)",
+			restore:       true,
+			storeInterval: 0,
+			mockSetup: func(mListAll *MockMetricListAllRepository, mSave *MockMetricSaveRepository, fListAll *MockMetricListAllFileRepository, fSave *MockMetricSaveFileRepository) {
+				fListAll.EXPECT().ListAll(gomock.Any()).Return([]types.Metrics{metric}, nil)
+				mSave.EXPECT().Save(gomock.Any(), metric).Return(nil)
+
+				mListAll.EXPECT().ListAll(gomock.Any()).Return([]types.Metrics{metric}, nil)
+				fSave.EXPECT().Save(gomock.Any(), metric).Return(nil)
+			},
+			expectErr: false,
+		},
+		{
+			name:          "Restore fails",
+			restore:       true,
+			storeInterval: 1,
+			mockSetup: func(mListAll *MockMetricListAllRepository, mSave *MockMetricSaveRepository, fListAll *MockMetricListAllFileRepository, fSave *MockMetricSaveFileRepository) {
+				fListAll.EXPECT().ListAll(gomock.Any()).Return(nil, errors.New("restore error"))
+			},
+			expectErr: true,
+		},
+		{
+			name:          "Store interval zero - save on shutdown error",
+			restore:       false,
+			storeInterval: 0,
+			mockSetup: func(mListAll *MockMetricListAllRepository, mSave *MockMetricSaveRepository, fListAll *MockMetricListAllFileRepository, fSave *MockMetricSaveFileRepository) {
+				mListAll.EXPECT().ListAll(gomock.Any()).Return([]types.Metrics{metric}, nil)
+				fSave.EXPECT().Save(gomock.Any(), metric).Return(errors.New("save error"))
+			},
+			expectErr: true,
+		},
+		{
+			name:          "Store interval non-zero - periodic save success then shutdown",
+			restore:       false,
+			storeInterval: 1,
+			mockSetup: func(mListAll *MockMetricListAllRepository, mSave *MockMetricSaveRepository, fListAll *MockMetricListAllFileRepository, fSave *MockMetricSaveFileRepository) {
+				mListAll.EXPECT().ListAll(gomock.Any()).Return([]types.Metrics{metric}, nil).MinTimes(1)
+				fSave.EXPECT().Save(gomock.Any(), metric).Return(nil).MinTimes(1)
+			},
+			expectErr: false,
+		},
+		{
+			name:          "Store interval non-zero - save returns error",
+			restore:       false,
+			storeInterval: 1,
+			mockSetup: func(mListAll *MockMetricListAllRepository, mSave *MockMetricSaveRepository, fListAll *MockMetricListAllFileRepository, fSave *MockMetricSaveFileRepository) {
+				mListAll.EXPECT().ListAll(gomock.Any()).Return([]types.Metrics{metric}, nil).Times(1)
+				fSave.EXPECT().Save(gomock.Any(), metric).Return(errors.New("save failure")).Times(1)
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			mockListAllMem := NewMockMetricListAllRepository(ctrl)
+			mockSaveMem := NewMockMetricSaveRepository(ctrl)
+			mockListAllFile := NewMockMetricListAllFileRepository(ctrl)
+			mockSaveFile := NewMockMetricSaveFileRepository(ctrl)
+
+			tt.mockSetup(mockListAllMem, mockSaveMem, mockListAllFile, mockSaveFile)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			if tt.storeInterval > 0 {
+				go func() {
+					time.Sleep(time.Duration(tt.storeInterval) * 1500 * time.Millisecond)
+					cancel()
+				}()
+			} else {
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					cancel()
+				}()
+			}
+
+			err := StartMetricServerWorker(ctx, mockListAllMem, mockSaveMem, mockListAllFile, mockSaveFile, tt.restore, tt.storeInterval)
+			if tt.expectErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

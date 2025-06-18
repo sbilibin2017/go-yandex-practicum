@@ -15,26 +15,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// CryptoMiddleware возвращает HTTP middleware, который при наличии пути к приватному ключу
-// загружает RSA приватный ключ и расшифровывает тело входящих запросов.
-//
-// Параметры:
-//   - keyPath: путь к файлу с приватным RSA ключом в PEM формате. Если пустая строка,
-//     расшифровка не выполняется и тело запроса передается как есть.
-//
-// Поведение middleware:
-//   - Считывает тело запроса полностью.
-//   - Если приватный ключ загружен, пытается декодировать тело из base64,
-//     затем расшифровывает с помощью RSA PKCS1v15.
-//   - Заменяет тело запроса на расшифрованное (или исходное, если ключ отсутствует).
-//   - Устанавливает корректный ContentLength.
-//
-// Использование:
-//
-//	Этот middleware полезен для серверов, которые принимают зашифрованные запросы
-//	с помощью публичного ключа клиента и хотят автоматически расшифровать их.
-//
-// Возвращает функцию middleware для использования в цепочке HTTP-обработчиков.
 func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 	var privateKey *rsa.PrivateKey
 
@@ -58,11 +38,12 @@ func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			encBody, err := io.ReadAll(r.Body)
+			r.Body.Close()
 			if err != nil {
-				http.Error(w, "failed to read request body", http.StatusBadRequest)
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("failed to read request body"))
 				return
 			}
-			r.Body.Close()
 
 			if len(encBody) == 0 {
 				next.ServeHTTP(w, r)
@@ -73,13 +54,15 @@ func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 			if privateKey != nil {
 				cipherText, err := base64.StdEncoding.DecodeString(string(encBody))
 				if err != nil {
-					http.Error(w, "invalid base64 body", http.StatusBadRequest)
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte("invalid base64 body"))
 					return
 				}
 
 				plainText, err = rsa.DecryptPKCS1v15(rand.Reader, privateKey, cipherText)
 				if err != nil {
-					http.Error(w, "failed to decrypt body", http.StatusBadRequest)
+					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte("failed to decrypt body"))
 					return
 				}
 			} else {
