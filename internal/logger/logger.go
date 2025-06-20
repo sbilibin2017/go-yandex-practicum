@@ -34,3 +34,9 @@ func Initialize(level string) error {
 	Log = baseLogger.Sugar()
 	return nil
 }
+
+// Sync flushes any buffered log entries.
+// It should be called before the application exits.
+func Sync() error {
+	return Log.Sync()
+}

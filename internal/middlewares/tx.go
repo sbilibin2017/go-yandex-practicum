@@ -2,12 +2,9 @@ package middlewares
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"go.uber.org/zap"
 )
 
 func TxMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
@@ -27,12 +24,18 @@ func TxMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
 			ctx := setTx(r.Context(), tx)
 			rr := &responseRecorder{ResponseWriter: w}
 
-			err = withTx(ctx, func(ctx context.Context) error {
-				next.ServeHTTP(rr, r.WithContext(ctx))
-				return nil
-			})
-			if err != nil {
-				logger.Log.Error(zap.Error(err))
+			next.ServeHTTP(rr, r.WithContext(ctx))
+
+			if rr.statusCode >= 400 {
+				_ = tx.Rollback()
+				return
+			}
+
+			if err := tx.Commit(); err != nil {
+				if !rr.wroteHeader {
+					rr.WriteHeader(http.StatusInternalServerError)
+				}
+				return
 			}
 		})
 	}
@@ -41,48 +44,22 @@ func TxMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
 type responseRecorder struct {
 	http.ResponseWriter
 	wroteHeader bool
+	statusCode  int
 }
 
 func (r *responseRecorder) WriteHeader(code int) {
 	if !r.wroteHeader {
 		r.wroteHeader = true
+		r.statusCode = code
 		r.ResponseWriter.WriteHeader(code)
 	}
 }
 
 func (r *responseRecorder) Write(b []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
 	return r.ResponseWriter.Write(b)
-}
-
-// WithTx executes fn with the transaction stored in the context.
-// It commits if fn returns nil, rolls back on error or panic.
-func withTx(
-	ctx context.Context,
-	fn func(ctx context.Context) error,
-) error {
-	tx := getTx(ctx)
-	if tx == nil {
-		return fmt.Errorf("no transaction in context")
-	}
-
-	defer func() {
-		if r := recover(); r != nil {
-			_ = tx.Rollback()
-			panic(r) // rethrow after rollback
-		}
-	}()
-
-	if err := fn(ctx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-
-	return nil
 }
 
 type txContextKey struct{}
@@ -91,33 +68,7 @@ func setTx(ctx context.Context, tx *sqlx.Tx) context.Context {
 	return context.WithValue(ctx, txContextKey{}, tx)
 }
 
-func getTx(ctx context.Context) *sqlx.Tx {
+func GetTx(ctx context.Context) *sqlx.Tx {
 	tx, _ := ctx.Value(txContextKey{}).(*sqlx.Tx)
 	return tx
-}
-
-// namedPreparer — интерфейс, определяющий возможность подготовки именованных запросов в контексте.
-// Используется для унификации работы с транзакцией (sqlx.Tx) и базой данных (sqlx.DB).
-type Executor interface {
-	// PrepareNamedContext подготавливает именованный запрос в заданном контексте.
-	PrepareNamedContext(ctx context.Context, query string) (*sqlx.NamedStmt, error)
-}
-
-// getExecutor возвращает объект для выполнения SQL-запросов с именованными параметрами.
-// Если в контексте (через txGetter) присутствует транзакция, она будет использована для подготовки запроса;
-// в противном случае возвращается экземпляр базы данных *sqlx.DB.
-// Параметры:
-//   - ctx: контекст выполнения запроса.
-//   - db: база данных, используемая как запасной вариант.
-//   - txGetter: функция для извлечения транзакции из контекста.
-//
-// Возвращает объект, реализующий интерфейс namedPreparer.
-func GetExecutor(
-	ctx context.Context,
-	db *sqlx.DB,
-) Executor {
-	if tx := getTx(ctx); tx != nil {
-		return tx
-	}
-	return db
 }

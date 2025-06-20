@@ -14,9 +14,10 @@ func HashMiddleware(
 	header string,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		if key == "" {
+		if key == "" || header == "" {
 			return next
 		}
+
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {

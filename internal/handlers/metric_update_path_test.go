@@ -1,115 +1,134 @@
-package handlers
+package http
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/golang/mock/gomock"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/stretchr/testify/assert"
+
+	internalErrors "github.com/sbilibin2017/go-yandex-practicum/internal/errors"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-func TestNewMetricUpdatePathHandler(t *testing.T) {
+func TestMetricUpdatePathHandler_ServeHTTP(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockSvc := NewMockMetricUpdatePathService(ctrl)
-	handler := NewMetricUpdatePathHandler(mockSvc)
+	var (
+		handler *MetricUpdatePathHandler
+		w       *httptest.ResponseRecorder
+		r       *http.Request
+	)
 
 	tests := []struct {
 		name           string
-		query          string
-		mockSetup      func()
+		mType          string
+		mName          string
+		mValue         string
+		valErr         error
+		setup          func()
 		expectedStatus int
 	}{
 		{
-			name:           "Missing name param",
-			query:          "type=counter&value=10",
-			mockSetup:      func() {},
+			name:   "success",
+			mType:  "gauge",
+			mName:  "temperature",
+			mValue: "42.5",
+			valErr: nil,
+			setup: func() {
+				mockSvc := NewMockMetricUpdatePathService(ctrl)
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return([]*types.Metrics{types.NewMetricFromAttributes("gauge", "temperature", "42.5")}, nil)
+
+				valFunc := func(mType, mName, mValue string) error {
+					return nil
+				}
+
+				handler = NewMetricUpdatePathHandler(mockSvc, valFunc)
+			},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:   "validation error - metric name required",
+			mType:  "gauge",
+			mName:  "",
+			mValue: "42.5",
+			valErr: internalErrors.ErrMetricNameRequired,
+			setup: func() {
+				valFunc := func(mType, mName, mValue string) error {
+					return internalErrors.ErrMetricNameRequired
+				}
+				// mock service won't be called on validation error, so nil is fine here
+				handler = NewMetricUpdatePathHandler(nil, valFunc)
+			},
 			expectedStatus: http.StatusNotFound,
 		},
 		{
-			name:           "Missing value param",
-			query:          "name=metric1&type=counter",
-			mockSetup:      func() {},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "Invalid counter value",
-			query:          "name=metric1&type=counter&value=notint",
-			mockSetup:      func() {},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "Invalid gauge value",
-			query:          "name=metric1&type=gauge&value=notfloat",
-			mockSetup:      func() {},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "Invalid metric type",
-			query:          "name=metric1&type=invalid&value=123",
-			mockSetup:      func() {},
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:  "Service returns error",
-			query: "name=metric1&type=counter&value=123",
-			mockSetup: func() {
+			name:   "service error",
+			mType:  "gauge",
+			mName:  "temperature",
+			mValue: "42.5",
+			valErr: nil,
+			setup: func() {
+				mockSvc := NewMockMetricUpdatePathService(ctrl)
 				mockSvc.EXPECT().
 					Updates(gomock.Any(), gomock.Any()).
-					Return(nil, assert.AnError)
+					Return(nil, internalErrors.ErrInvalidCounterValue)
+
+				valFunc := func(mType, mName, mValue string) error {
+					return nil
+				}
+
+				handler = NewMetricUpdatePathHandler(mockSvc, valFunc)
+			},
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:   "unknown service error",
+			mType:  "gauge",
+			mName:  "temperature",
+			mValue: "42.5",
+			valErr: nil,
+			setup: func() {
+				mockSvc := NewMockMetricUpdatePathService(ctrl)
+				mockSvc.EXPECT().
+					Updates(gomock.Any(), gomock.Any()).
+					Return(nil, errors.New("unknown error"))
+
+				valFunc := func(mType, mName, mValue string) error {
+					return nil
+				}
+
+				handler = NewMetricUpdatePathHandler(mockSvc, valFunc)
 			},
 			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:  "Successful update counter",
-			query: "name=metric1&type=counter&value=123",
-			mockSetup: func() {
-				mockSvc.EXPECT().
-					Updates(gomock.Any(), []*types.Metrics{
-						{
-							ID:    "metric1",
-							Type:  types.Counter,
-							Delta: func() *int64 { v := int64(123); return &v }(),
-						},
-					}).
-					Return(nil, nil)
-			},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name:  "Successful update gauge",
-			query: "name=metric1&type=gauge&value=123.45",
-			mockSetup: func() {
-				mockSvc.EXPECT().
-					Updates(gomock.Any(), []*types.Metrics{
-						{
-							ID:    "metric1",
-							Type:  types.Gauge,
-							Value: func() *float64 { v := 123.45; return &v }(),
-						},
-					}).
-					Return(nil, nil)
-			},
-			expectedStatus: http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
+		tt := tt // capture range variable for parallel tests if needed
+
 		t.Run(tt.name, func(t *testing.T) {
-			tt.mockSetup()
+			tt.setup()
 
-			req := httptest.NewRequest(http.MethodPost, "/update?"+tt.query, nil)
-			rec := httptest.NewRecorder()
+			// Setup request with chi URL params
+			r = httptest.NewRequest(http.MethodPost, "/", nil)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("type", tt.mType)
+			routeCtx.URLParams.Add("name", tt.mName)
+			routeCtx.URLParams.Add("value", tt.mValue)
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, routeCtx))
 
-			handler.ServeHTTP(rec, req)
+			w = httptest.NewRecorder()
 
-			res := rec.Result()
-			defer res.Body.Close()
-
-			assert.Equal(t, tt.expectedStatus, res.StatusCode)
+			handler.ServeHTTP(w, r)
+			assert.Equal(t, tt.expectedStatus, w.Result().StatusCode)
 		})
 	}
 }

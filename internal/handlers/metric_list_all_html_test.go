@@ -1,4 +1,4 @@
-package handlers_test
+package http
 
 import (
 	"net/http"
@@ -8,88 +8,67 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sbilibin2017/go-yandex-practicum/internal/handlers"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-func TestMetricListAllHTMLHandler(t *testing.T) {
+func TestMetricListAllHTMLHandler_ServeHTTP(t *testing.T) {
+	floatPtr := func(f float64) *float64 { return &f }
+	intPtr := func(i int64) *int64 { return &i }
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	float64Ptr := func(f float64) *float64 {
-		return &f
-	}
-
-	int64Ptr := func(i int64) *int64 {
-		return &i
-	}
-
-	mockSvc := handlers.NewMockMetricListAllHTMLService(ctrl)
-	handler := handlers.NewMetricListAllHTMLHandler(mockSvc)
-
 	tests := []struct {
-		name          string
-		mockReturn    []types.Metrics
-		mockErr       error
-		wantStatus    int
-		wantBodyParts []string // substrings that must appear in response body
+		name            string
+		mockReturn      []*types.Metrics
+		mockError       error
+		wantStatusCode  int
+		wantBodySubstr  string
+		wantContentType string
 	}{
 		{
-			name: "Success with gauge and counter",
-			mockReturn: []types.Metrics{
-				{
-					ID:    "gauge1",
-					Type:  types.Gauge,
-					Value: float64Ptr(3.14),
-				},
-				{
-					ID:    "counter1",
-					Type:  types.Counter,
-					Delta: int64Ptr(42),
-				},
+			name: "success returns metrics html",
+			mockReturn: []*types.Metrics{
+				{ID: "metric1", MType: types.Gauge, Value: floatPtr(3.14)},
+				{ID: "metric2", MType: types.Counter, Delta: intPtr(10)},
 			},
-			mockErr:    nil,
-			wantStatus: http.StatusOK,
-			wantBodyParts: []string{
-				"gauge1: 3.14",
-				"counter1: 42",
-				"<!DOCTYPE html>",
-				"<ul>",
-				"</ul>",
-			},
+			mockError:       nil,
+			wantStatusCode:  http.StatusOK,
+			wantBodySubstr:  "metric1",
+			wantContentType: "text/html; charset=utf-8",
 		},
 		{
-			name:       "Service error returns 500",
-			mockReturn: nil,
-			mockErr:    assert.AnError,
-			wantStatus: http.StatusInternalServerError,
+			name:           "service returns error",
+			mockReturn:     nil,
+			mockError:      assert.AnError,
+			wantStatusCode: http.StatusInternalServerError,
+			wantBodySubstr: "Internal server error",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockSvc.EXPECT().ListAll(gomock.Any()).Return(tt.mockReturn, tt.mockErr)
+			mockSvc := NewMockMetricListAllHTMLService(ctrl)
+			mockSvc.EXPECT().ListAll(gomock.Any()).Return(tt.mockReturn, tt.mockError)
+
+			handler := NewMetricListAllHTMLHandler(mockSvc)
 
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			w := httptest.NewRecorder()
 
-			handler(w, req)
+			handler.ServeHTTP(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close() // <-- close the response body here
+			body := w.Body.String()
 
-			bodyBytes := w.Body.Bytes()
-			body := string(bodyBytes)
+			assert.Equal(t, tt.wantStatusCode, resp.StatusCode)
 
-			assert.Equal(t, tt.wantStatus, resp.StatusCode)
-
-			for _, part := range tt.wantBodyParts {
-				assert.Contains(t, body, part)
+			if tt.wantContentType != "" {
+				assert.Equal(t, tt.wantContentType, resp.Header.Get("Content-Type"))
 			}
 
-			// When error returned, body contains default error message from http.Error
-			if tt.mockErr != nil {
-				assert.Contains(t, body, "Internal server error")
+			if tt.wantBodySubstr != "" {
+				assert.Contains(t, body, tt.wantBodySubstr)
 			}
 		})
 	}

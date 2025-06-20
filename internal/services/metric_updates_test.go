@@ -32,18 +32,18 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 		{
 			name: "successful update counter metric with existing delta",
 			inputMetrics: []*types.Metrics{
-				{ID: "counter1", Type: types.Counter, Delta: func() *int64 { v := int64(5); return &v }()},
+				{ID: "counter1", MType: types.Counter, Delta: func() *int64 { v := int64(5); return &v }()},
 			},
 			mockGetSetup: func() {
 				mockGetRepo.EXPECT().
-					GetByID(ctx, types.MetricID{ID: "counter1", Type: types.Counter}).
-					Return(&types.Metrics{ID: "counter1", Type: types.Counter, Delta: func() *int64 { v := int64(10); return &v }()}, nil)
+					GetByID(ctx, types.MetricID{ID: "counter1", MType: types.Counter}).
+					Return(&types.Metrics{ID: "counter1", MType: types.Counter, Delta: func() *int64 { v := int64(10); return &v }()}, nil)
 			},
 			mockSaveSetup: func() {
 				mockSaveRepo.EXPECT().
 					Save(ctx, gomock.AssignableToTypeOf(types.Metrics{})).
 					DoAndReturn(func(_ context.Context, m types.Metrics) error {
-						if m.ID != "counter1" || m.Type != types.Counter {
+						if m.ID != "counter1" || m.MType != types.Counter {
 							return errors.New("wrong metric saved")
 						}
 						if m.Delta == nil || *m.Delta != 15 {
@@ -53,25 +53,25 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 					})
 			},
 			expectedMetrics: []*types.Metrics{
-				{ID: "counter1", Type: types.Counter, Delta: func() *int64 { v := int64(15); return &v }()},
+				{ID: "counter1", MType: types.Counter, Delta: func() *int64 { v := int64(15); return &v }()},
 			},
 			expectedErr: nil,
 		},
 		{
 			name: "metric without existing delta",
 			inputMetrics: []*types.Metrics{
-				{ID: "counter2", Type: types.Counter, Delta: nil},
+				{ID: "counter2", MType: types.Counter, Delta: nil},
 			},
 			mockGetSetup: func() {
 				mockGetRepo.EXPECT().
-					GetByID(ctx, types.MetricID{ID: "counter2", Type: types.Counter}).
+					GetByID(ctx, types.MetricID{ID: "counter2", MType: types.Counter}).
 					Return(nil, nil)
 			},
 			mockSaveSetup: func() {
 				mockSaveRepo.EXPECT().
 					Save(ctx, gomock.AssignableToTypeOf(types.Metrics{})).
 					DoAndReturn(func(_ context.Context, m types.Metrics) error {
-						if m.ID != "counter2" || m.Type != types.Counter {
+						if m.ID != "counter2" || m.MType != types.Counter {
 							return errors.New("wrong metric saved")
 						}
 						if m.Delta == nil || *m.Delta != 0 {
@@ -81,18 +81,18 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 					})
 			},
 			expectedMetrics: []*types.Metrics{
-				{ID: "counter2", Type: types.Counter, Delta: func() *int64 { v := int64(0); return &v }()},
+				{ID: "counter2", MType: types.Counter, Delta: func() *int64 { v := int64(0); return &v }()},
 			},
 			expectedErr: nil,
 		},
 		{
 			name: "get by ID repository error",
 			inputMetrics: []*types.Metrics{
-				{ID: "counter3", Type: types.Counter, Delta: func() *int64 { v := int64(1); return &v }()},
+				{ID: "counter3", MType: types.Counter, Delta: func() *int64 { v := int64(1); return &v }()},
 			},
 			mockGetSetup: func() {
 				mockGetRepo.EXPECT().
-					GetByID(ctx, types.MetricID{ID: "counter3", Type: types.Counter}).
+					GetByID(ctx, types.MetricID{ID: "counter3", MType: types.Counter}).
 					Return(nil, errors.New("db error"))
 			},
 			mockSaveSetup:   func() {},
@@ -102,12 +102,12 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 		{
 			name: "save repository error",
 			inputMetrics: []*types.Metrics{
-				{ID: "counter4", Type: types.Counter, Delta: func() *int64 { v := int64(2); return &v }()},
+				{ID: "counter4", MType: types.Counter, Delta: func() *int64 { v := int64(2); return &v }()},
 			},
 			mockGetSetup: func() {
 				mockGetRepo.EXPECT().
-					GetByID(ctx, types.MetricID{ID: "counter4", Type: types.Counter}).
-					Return(&types.Metrics{ID: "counter4", Type: types.Counter, Delta: func() *int64 { v := int64(3); return &v }()}, nil)
+					GetByID(ctx, types.MetricID{ID: "counter4", MType: types.Counter}).
+					Return(&types.Metrics{ID: "counter4", MType: types.Counter, Delta: func() *int64 { v := int64(3); return &v }()}, nil)
 			},
 			mockSaveSetup: func() {
 				mockSaveRepo.EXPECT().
@@ -136,7 +136,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 				for i, want := range tt.expectedMetrics {
 					gotMetric := got[i]
 					assert.Equal(t, want.ID, gotMetric.ID)
-					assert.Equal(t, want.Type, gotMetric.Type)
+					assert.Equal(t, want.MType, gotMetric.MType)
 					if want.Delta == nil {
 						assert.Nil(t, gotMetric.Delta)
 					} else {

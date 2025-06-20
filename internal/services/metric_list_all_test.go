@@ -22,7 +22,7 @@ func TestMetricListAllService_ListAll(t *testing.T) {
 	tests := []struct {
 		name          string
 		mockSetup     func()
-		expected      []types.Metrics
+		expected      []*types.Metrics
 		expectedError error
 	}{
 		{
@@ -30,15 +30,15 @@ func TestMetricListAllService_ListAll(t *testing.T) {
 			mockSetup: func() {
 				mockRepo.EXPECT().
 					ListAll(ctx).
-					Return([]types.Metrics{
-						{ID: "metric1", Type: types.Counter},
-						{ID: "metric2", Type: types.Gauge},
+					Return([]*types.Metrics{
+						{ID: "metric1", MType: types.Counter},
+						{ID: "metric2", MType: types.Gauge},
 					}, nil).
 					Times(1)
 			},
-			expected: []types.Metrics{
-				{ID: "metric1", Type: types.Counter},
-				{ID: "metric2", Type: types.Gauge},
+			expected: []*types.Metrics{
+				{ID: "metric1", MType: types.Counter},
+				{ID: "metric2", MType: types.Gauge},
 			},
 			expectedError: nil,
 		},
@@ -47,7 +47,7 @@ func TestMetricListAllService_ListAll(t *testing.T) {
 			mockSetup: func() {
 				mockRepo.EXPECT().
 					ListAll(ctx).
-					Return([]types.Metrics{}, nil).
+					Return([]*types.Metrics{}, nil).
 					Times(1)
 			},
 			expected:      nil,

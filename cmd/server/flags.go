@@ -25,16 +25,28 @@ var (
 	flagTrustedSubnet   string
 )
 
-func init() {
-	parseFlags()
-	err := parseConfigFile()
+func flags() error {
+	err := parseFlags()
 	if err != nil {
-		panic(err)
+		return err
 	}
-	parseEnv()
+
+	err = parseConfigFile()
+	if err != nil {
+		return err
+	}
+
+	err = parseEnvs()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func parseFlags() {
+func parseFlags() error {
+	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
+
 	pflag.StringVarP(&flagServerAddress, "address", "a", ":8080", "address and port to run server")
 	pflag.StringVarP(&flagDatabaseDSN, "dsn", "d", "", "dsn for database connection")
 	pflag.IntVarP(&flagStoreInterval, "interval", "i", 300, "interval (in seconds) to store data")
@@ -45,46 +57,51 @@ func parseFlags() {
 	pflag.StringVarP(&flagConfigPath, "config", "c", "", "path to config file")
 	pflag.StringVarP(&flagTrustedSubnet, "trusted-subnet", "t", "", "trusted subnet in CIDR notation")
 
-	pflag.Parse()
+	return pflag.CommandLine.Parse(os.Args[1:])
 }
 
-func parseEnv() {
-	if env := os.Getenv("ADDRESS"); env != "" {
-		flagServerAddress = env
+func parseEnvs() error {
+	if v := os.Getenv("ADDRESS"); v != "" {
+		flagServerAddress = v
 	}
-	if env := os.Getenv("DATABASE_DSN"); env != "" {
-		flagDatabaseDSN = env
+	if v := os.Getenv("DATABASE_DSN"); v != "" {
+		flagDatabaseDSN = v
 	}
-	if env := os.Getenv("STORE_INTERVAL"); env != "" {
-		if v, err := strconv.Atoi(env); err == nil {
-			flagStoreInterval = v
+	if v := os.Getenv("STORE_INTERVAL"); v != "" {
+		if val, err := strconv.Atoi(v); err == nil {
+			flagStoreInterval = val
 		}
 	}
-	if env := os.Getenv("FILE_STORAGE_PATH"); env != "" {
-		flagFileStoragePath = env
+	if v := os.Getenv("FILE_STORAGE_PATH"); v != "" {
+		flagFileStoragePath = v
 	}
-	if env := os.Getenv("RESTORE"); env != "" {
-		if v, err := strconv.ParseBool(env); err == nil {
-			flagRestore = v
+	if v := os.Getenv("RESTORE"); v != "" {
+		if val, err := strconv.ParseBool(v); err == nil {
+			flagRestore = val
 		}
 	}
-	if env := os.Getenv("KEY"); env != "" {
-		flagKey = env
+	if v := os.Getenv("KEY"); v != "" {
+		flagKey = v
 	}
-	if env := os.Getenv("CRYPTO_KEY"); env != "" {
-		flagCryptoKey = env
+	if v := os.Getenv("CRYPTO_KEY"); v != "" {
+		flagCryptoKey = v
 	}
-	if env := os.Getenv("CONFIG"); env != "" {
-		flagConfigPath = env
+	if v := os.Getenv("CONFIG"); v != "" {
+		flagConfigPath = v
 	}
-	if env := os.Getenv("TRUSTED_SUBNET"); env != "" {
-		flagTrustedSubnet = env
+	if v := os.Getenv("TRUSTED_SUBNET"); v != "" {
+		flagTrustedSubnet = v
 	}
+	return nil
 }
 
 func parseConfigFile() error {
 	if flagConfigPath == "" {
 		return nil
+	}
+
+	if _, err := os.Stat(flagConfigPath); os.IsNotExist(err) {
+		return err
 	}
 
 	file, err := os.Open(flagConfigPath)
@@ -93,45 +110,44 @@ func parseConfigFile() error {
 	}
 	defer file.Close()
 
-	var cfg struct {
-		Address       string `json:"address"`
-		DatabaseDSN   string `json:"database_dsn"`
-		StoreInterval int    `json:"store_interval"`
-		FilePath      string `json:"store_file"`
-		Restore       bool   `json:"restore"`
-		Key           string `json:"key"`
-		CryptoKey     string `json:"crypto_key"`
-		TrustedSubnet string `json:"trusted_subnet"`
-	}
+	cfg := &struct {
+		ServerAddress   *string `json:"server_address,omitempty"`
+		DatabaseDSN     *string `json:"database_dsn,omitempty"`
+		StoreInterval   *int    `json:"store_interval,omitempty"`
+		FileStoragePath *string `json:"file_storage_path,omitempty"`
+		Restore         *bool   `json:"restore,omitempty"`
+		Key             *string `json:"key,omitempty"`
+		CryptoKey       *string `json:"crypto_key,omitempty"`
+		TrustedSubnet   *string `json:"trusted_subnet,omitempty"`
+	}{}
 
-	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
+	if err := json.NewDecoder(file).Decode(cfg); err != nil {
 		return err
 	}
 
-	if cfg.Address != "" && flagServerAddress == ":8080" {
-		flagServerAddress = cfg.Address
+	if cfg.ServerAddress != nil {
+		flagServerAddress = *cfg.ServerAddress
 	}
-	if cfg.DatabaseDSN != "" && flagDatabaseDSN == "" {
-		flagDatabaseDSN = cfg.DatabaseDSN
+	if cfg.DatabaseDSN != nil {
+		flagDatabaseDSN = *cfg.DatabaseDSN
 	}
-	if cfg.StoreInterval != 0 && flagStoreInterval == 300 {
-		flagStoreInterval = cfg.StoreInterval
+	if cfg.StoreInterval != nil {
+		flagStoreInterval = *cfg.StoreInterval
 	}
-	if cfg.FilePath != "" && flagFileStoragePath == "" {
-		flagFileStoragePath = cfg.FilePath
+	if cfg.FileStoragePath != nil {
+		flagFileStoragePath = *cfg.FileStoragePath
 	}
-	if !flagRestore {
-		flagRestore = cfg.Restore
+	if cfg.Restore != nil {
+		flagRestore = *cfg.Restore
 	}
-	if cfg.Key != "" && flagKey == "" {
-		flagKey = cfg.Key
+	if cfg.Key != nil {
+		flagKey = *cfg.Key
 	}
-	if cfg.CryptoKey != "" && flagCryptoKey == "" {
-		flagCryptoKey = cfg.CryptoKey
+	if cfg.CryptoKey != nil {
+		flagCryptoKey = *cfg.CryptoKey
 	}
-
-	if cfg.TrustedSubnet != "" && flagTrustedSubnet == "" {
-		flagTrustedSubnet = cfg.TrustedSubnet
+	if cfg.TrustedSubnet != nil {
+		flagTrustedSubnet = *cfg.TrustedSubnet
 	}
 
 	return nil

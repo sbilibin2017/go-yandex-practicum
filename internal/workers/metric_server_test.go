@@ -58,7 +58,7 @@ func Test_loadMetricsFromFile(t *testing.T) {
 			var delta int64 = 123
 			testMetric := types.Metrics{
 				ID:    "metric1",
-				Type:  types.Counter,
+				MType: types.Counter,
 				Delta: &delta,
 			}
 
@@ -127,7 +127,7 @@ func Test_saveMetricsToFile(t *testing.T) {
 
 			testMetric := types.Metrics{
 				ID:    "metric2",
-				Type:  types.Gauge,
+				MType: types.Gauge,
 				Value: &value,
 			}
 
@@ -153,8 +153,8 @@ func TestStartMetricServerWorker(t *testing.T) {
 	defer ctrl.Finish()
 
 	metric := types.Metrics{
-		ID:   "metric1",
-		Type: types.Counter,
+		ID:    "metric1",
+		MType: types.Counter,
 		Delta: func() *int64 {
 			v := int64(10)
 			return &v

@@ -36,10 +36,10 @@ func (m *MockMetricListAllRepository) EXPECT() *MockMetricListAllRepositoryMockR
 }
 
 // ListAll mocks base method.
-func (m *MockMetricListAllRepository) ListAll(ctx context.Context) ([]types.Metrics, error) {
+func (m *MockMetricListAllRepository) ListAll(ctx context.Context) ([]*types.Metrics, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListAll", ctx)
-	ret0, _ := ret[0].([]types.Metrics)
+	ret0, _ := ret[0].([]*types.Metrics)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

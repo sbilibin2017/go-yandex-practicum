@@ -19,10 +19,10 @@ func TestMetricGetService_Get(t *testing.T) {
 	svc := NewMetricGetService(mockRepo)
 	ctx := context.Background()
 
-	metricID := types.MetricID{ID: "metric1", Type: types.Counter}
+	metricID := types.MetricID{ID: "metric1", MType: types.Counter}
 	expectedMetric := &types.Metrics{
 		ID:    "metric1",
-		Type:  types.Counter,
+		MType: types.Counter,
 		Delta: nil,
 		Value: nil,
 	}

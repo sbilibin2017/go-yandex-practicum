@@ -31,24 +31,19 @@ func generateTestKeys(t *testing.T) (privateKeyPEM []byte, privateKey *rsa.Priva
 func TestCryptoMiddleware_DecryptSuccess(t *testing.T) {
 	privPEM, privKey := generateTestKeys(t)
 
-	// Создаем middleware с приватным ключом
 	tmpFile := t.TempDir() + "/priv.pem"
 	err := os.WriteFile(tmpFile, privPEM, 0600)
 	assert.NoError(t, err)
 
-	middleware := CryptoMiddleware(tmpFile)
+	middleware := CryptoMiddleware(&tmpFile)
 
-	// Исходный текст
 	plainText := []byte("secret data")
 
-	// Шифруем с публичным ключом
 	cipherText, err := rsa.EncryptPKCS1v15(rand.Reader, &privKey.PublicKey, plainText)
 	assert.NoError(t, err)
 
-	// Base64 кодируем
 	encoded := base64.StdEncoding.EncodeToString(cipherText)
 
-	// Создаем запрос с base64 телом
 	req := httptest.NewRequest("POST", "/", strings.NewReader(encoded))
 	rr := httptest.NewRecorder()
 
@@ -73,7 +68,7 @@ func TestCryptoMiddleware_InvalidBase64(t *testing.T) {
 	err := os.WriteFile(tmpFile, privPEM, 0600)
 	assert.NoError(t, err)
 
-	middleware := CryptoMiddleware(tmpFile)
+	middleware := CryptoMiddleware(&tmpFile)
 
 	req := httptest.NewRequest("POST", "/", strings.NewReader("%%%invalid_base64%%%"))
 	rr := httptest.NewRecorder()
@@ -85,11 +80,12 @@ func TestCryptoMiddleware_InvalidBase64(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 	assert.False(t, called, "handler should not be called on invalid base64")
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.Equal(t, 400, rr.Code)
 }
 
 func TestCryptoMiddleware_NoKey_PassesBodyAsIs(t *testing.T) {
-	middleware := CryptoMiddleware("")
+	// Pass nil to simulate no key path
+	middleware := CryptoMiddleware(nil)
 
 	plainText := "not encrypted body"
 
@@ -102,16 +98,16 @@ func TestCryptoMiddleware_NoKey_PassesBodyAsIs(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		assert.NoError(t, err)
 		assert.Equal(t, plainText, string(body))
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(200)
 	}))
 
 	handler.ServeHTTP(rr, req)
 	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, 200, rr.Code)
 }
 
 func TestCryptoMiddleware_EmptyBody(t *testing.T) {
-	middleware := CryptoMiddleware("")
+	middleware := CryptoMiddleware(nil)
 
 	req := httptest.NewRequest("POST", "/", nil)
 	rr := httptest.NewRecorder()
@@ -119,10 +115,10 @@ func TestCryptoMiddleware_EmptyBody(t *testing.T) {
 	called := false
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(200)
 	}))
 
 	handler.ServeHTTP(rr, req)
 	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, 200, rr.Code)
 }

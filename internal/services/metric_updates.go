@@ -78,9 +78,9 @@ func (svc *MetricUpdatesService) Updates(
 	updatedMetrics := make(map[types.MetricID]*types.Metrics)
 
 	for _, metric := range metrics {
-		switch metric.Type {
+		switch metric.MType {
 		case types.Counter:
-			currentMetric, err := svc.mfor.GetByID(ctx, types.MetricID{ID: metric.ID, Type: metric.Type})
+			currentMetric, err := svc.mfor.GetByID(ctx, types.MetricID{ID: metric.ID, MType: metric.MType})
 			if err != nil {
 				return nil, err
 			}
@@ -102,7 +102,7 @@ func (svc *MetricUpdatesService) Updates(
 			return nil, err
 		}
 
-		id := types.MetricID{ID: metric.ID, Type: metric.Type}
+		id := types.MetricID{ID: metric.ID, MType: metric.MType}
 		updatedMetrics[id] = metric
 	}
 

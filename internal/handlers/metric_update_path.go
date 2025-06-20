@@ -1,10 +1,11 @@
-package handlers
+package http
 
 import (
 	"context"
 	"net/http"
-	"strconv"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/errors"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
@@ -12,52 +13,49 @@ type MetricUpdatePathService interface {
 	Updates(ctx context.Context, metrics []*types.Metrics) ([]*types.Metrics, error)
 }
 
-func NewMetricUpdatePathHandler(svc MetricUpdatePathService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.URL.Query().Get("name")
-		mType := r.URL.Query().Get("type")
-		value := r.URL.Query().Get("value")
+type MetricUpdatePathHandler struct {
+	svc MetricUpdatePathService
+	val func(mType string, mName string, mValue string) error
+}
 
-		if name == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		if value == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+func NewMetricUpdatePathHandler(
+	svc MetricUpdatePathService,
+	val func(mType string, mName string, mValue string) error,
+) *MetricUpdatePathHandler {
+	return &MetricUpdatePathHandler{
+		svc: svc, val: val,
+	}
+}
 
-		var metric types.Metrics
-		metric.ID = name
+func (h *MetricUpdatePathHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	mType := chi.URLParam(r, "type")
+	mName := chi.URLParam(r, "name")
+	mValue := chi.URLParam(r, "value")
 
-		switch mType {
-		case string(types.Counter):
-			delta, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			metric.Delta = &delta
-			metric.Type = types.Counter
-		case string(types.Gauge):
-			val, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			metric.Value = &val
-			metric.Type = types.Gauge
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+	err := h.val(mType, mName, mValue)
+	if err != nil {
+		handleMetricupdatePathError(w, err)
+		return
+	}
 
-		_, err := svc.Updates(r.Context(), []*types.Metrics{&metric})
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	metrics := types.NewMetricFromAttributes(mType, mName, mValue)
 
-		w.WriteHeader(http.StatusOK)
+	_, err = h.svc.Updates(r.Context(), []*types.Metrics{metrics})
+	if err != nil {
+		handleMetricupdatePathError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleMetricupdatePathError(w http.ResponseWriter, err error) {
+	switch err {
+	case errors.ErrMetricNameRequired:
+		w.WriteHeader(http.StatusNotFound)
+	case errors.ErrUnsupportedMetricType, errors.ErrInvalidCounterValue, errors.ErrInvalidGaugeValue:
+		w.WriteHeader(http.StatusBadRequest)
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

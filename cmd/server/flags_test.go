@@ -1,320 +1,148 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
+	"github.com/sbilibin2017/go-yandex-practicum/internal/configs"
 	"github.com/stretchr/testify/assert"
 )
 
-func resetTestFlags() {
-	flagServerAddress = ":8080"
-	flagDatabaseDSN = ""
-	flagStoreInterval = 300
-	flagFileStoragePath = ""
-	flagRestore = false
-	flagKey = ""
-	flagCryptoKey = ""
-	flagConfigPath = ""
-}
+// helpers to get pointers for literals
+func strPtr(s string) *string { return &s }
+func intPtr(i int) *int       { return &i }
+func boolPtr(b bool) *bool    { return &b }
 
-func clearEnv(keys ...string) {
-	for _, k := range keys {
-		os.Unsetenv(k)
-	}
-}
-
-func resetFlags() {
-	flagServerAddress = ":8080"
-	flagDatabaseDSN = ""
-	flagStoreInterval = 300
-	flagFileStoragePath = ""
-	flagRestore = false
-	flagKey = ""
-	flagCryptoKey = ""
-	flagConfigPath = ""
-}
-
-func TestParseEnv(t *testing.T) {
-	tests := []struct {
-		name          string
-		env           map[string]string
-		wantAddress   string
-		wantDSN       string
-		wantInterval  int
-		wantFilePath  string
-		wantRestore   bool
-		wantKey       string
-		wantCryptoKey string
-		wantConfig    string
-	}{
-		{
-			name:          "empty env",
-			env:           nil,
-			wantAddress:   ":8080",
-			wantDSN:       "",
-			wantInterval:  300,
-			wantFilePath:  "",
-			wantRestore:   false,
-			wantKey:       "",
-			wantCryptoKey: "",
-			wantConfig:    "",
-		},
-		{
-			name: "all env set with valid values",
-			env: map[string]string{
-				"ADDRESS":           "127.0.0.1:9000",
-				"DATABASE_DSN":      "user:pass@/dbname",
-				"STORE_INTERVAL":    "120",
-				"FILE_STORAGE_PATH": "/tmp/files",
-				"RESTORE":           "true",
-				"KEY":               "envkey",
-				"CRYPTO_KEY":        "/env/crypto.pem",
-				"CONFIG":            "/env/config.json",
-			},
-			wantAddress:   "127.0.0.1:9000",
-			wantDSN:       "user:pass@/dbname",
-			wantInterval:  120,
-			wantFilePath:  "/tmp/files",
-			wantRestore:   true,
-			wantKey:       "envkey",
-			wantCryptoKey: "/env/crypto.pem",
-			wantConfig:    "/env/config.json",
-		},
-		{
-			name: "invalid int and bool env values",
-			env: map[string]string{
-				"STORE_INTERVAL": "invalid",
-				"RESTORE":        "notabool",
-			},
-			wantAddress:   ":8080",
-			wantDSN:       "",
-			wantInterval:  300, // default because invalid input
-			wantFilePath:  "",
-			wantRestore:   false, // default because invalid input
-			wantKey:       "",
-			wantCryptoKey: "",
-			wantConfig:    "",
-		},
-		{
-			name: "partial env set",
-			env: map[string]string{
-				"ADDRESS":        "192.168.1.1",
-				"STORE_INTERVAL": "10",
-				"RESTORE":        "true",
-			},
-			wantAddress:   "192.168.1.1",
-			wantDSN:       "",
-			wantInterval:  10,
-			wantFilePath:  "",
-			wantRestore:   true,
-			wantKey:       "",
-			wantCryptoKey: "",
-			wantConfig:    "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetFlags()
-
-			// Clear all relevant env vars before test
-			clearEnv("ADDRESS", "DATABASE_DSN", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "KEY", "CRYPTO_KEY", "CONFIG")
-
-			// Set environment variables for this test case
-			for k, v := range tt.env {
-				os.Setenv(k, v)
-			}
-
-			// Call the function under test
-			parseEnv()
-
-			assert.Equal(t, tt.wantAddress, flagServerAddress)
-			assert.Equal(t, tt.wantDSN, flagDatabaseDSN)
-			assert.Equal(t, tt.wantInterval, flagStoreInterval)
-			assert.Equal(t, tt.wantFilePath, flagFileStoragePath)
-			assert.Equal(t, tt.wantRestore, flagRestore)
-			assert.Equal(t, tt.wantKey, flagKey)
-			assert.Equal(t, tt.wantCryptoKey, flagCryptoKey)
-			assert.Equal(t, tt.wantConfig, flagConfigPath)
-
-			// Cleanup env vars
-			clearEnv("ADDRESS", "DATABASE_DSN", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "KEY", "CRYPTO_KEY", "CONFIG")
-		})
-	}
-}
-
-func writeTempConfig(t *testing.T, content string) string {
-	t.Helper()
-	tmpFile, err := os.CreateTemp("", "config-*.json") // use os.CreateTemp
+func TestParseFlags_NoError(t *testing.T) {
+	err := parseFlags()
 	assert.NoError(t, err)
+}
 
-	_, err = tmpFile.WriteString(content)
+func TestParseEnvs(t *testing.T) {
+	os.Setenv("ADDRESS", "localhost:9999")
+	os.Setenv("DATABASE_DSN", "env_dsn")
+	os.Setenv("STORE_INTERVAL", "123")
+	os.Setenv("FILE_STORAGE_PATH", "/env/file")
+	os.Setenv("RESTORE", "true")
+	os.Setenv("KEY", "env_key")
+	os.Setenv("CRYPTO_KEY", "/env/key.pem")
+	os.Setenv("CONFIG", "/some/path")
+	os.Setenv("TRUSTED_SUBNET", "192.168.0.0/16")
+
+	defer func() {
+		_ = os.Unsetenv("ADDRESS")
+		_ = os.Unsetenv("DATABASE_DSN")
+		_ = os.Unsetenv("STORE_INTERVAL")
+		_ = os.Unsetenv("FILE_STORAGE_PATH")
+		_ = os.Unsetenv("RESTORE")
+		_ = os.Unsetenv("KEY")
+		_ = os.Unsetenv("CRYPTO_KEY")
+		_ = os.Unsetenv("CONFIG")
+		_ = os.Unsetenv("TRUSTED_SUBNET")
+	}()
+
+	err := parseEnvs()
 	assert.NoError(t, err)
-
-	err = tmpFile.Close()
-	assert.NoError(t, err)
-
-	return tmpFile.Name()
+	assert.Equal(t, "localhost:9999", flagServerAddress)
+	assert.Equal(t, "env_dsn", flagDatabaseDSN)
+	assert.Equal(t, 123, flagStoreInterval)
+	assert.Equal(t, "/env/file", flagFileStoragePath)
+	assert.True(t, flagRestore)
+	assert.Equal(t, "env_key", flagKey)
+	assert.Equal(t, "/env/key.pem", flagCryptoKey)
+	assert.Equal(t, "/some/path", flagConfigPath)
+	assert.Equal(t, "192.168.0.0/16", flagTrustedSubnet)
 }
 
 func TestParseConfigFile(t *testing.T) {
-	tests := []struct {
-		name          string
-		configContent string
-		initialFlags  map[string]interface{}
-		wantFlags     map[string]interface{}
-		wantErr       bool
-	}{
-		{
-			name:          "no config path returns nil",
-			configContent: "",
-			initialFlags:  nil,
-			wantFlags: map[string]interface{}{
-				"flagServerAddress":   ":8080",
-				"flagDatabaseDSN":     "",
-				"flagStoreInterval":   300,
-				"flagFileStoragePath": "",
-				"flagRestore":         false,
-				"flagKey":             "",
-				"flagCryptoKey":       "",
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid config overrides defaults",
-			configContent: `{
-				"address": "127.0.0.1:9090",
-				"database_dsn": "user:pass@/dbname",
-				"store_interval": 60,
-				"store_file": "/tmp/store.json",
-				"restore": true,
-				"key": "secretkey",
-				"crypto_key": "/tmp/crypto.pem"
-			}`,
-			initialFlags: nil,
-			wantFlags: map[string]interface{}{
-				"flagServerAddress":   "127.0.0.1:9090",
-				"flagDatabaseDSN":     "user:pass@/dbname",
-				"flagStoreInterval":   60,
-				"flagFileStoragePath": "/tmp/store.json",
-				"flagRestore":         true,
-				"flagKey":             "secretkey",
-				"flagCryptoKey":       "/tmp/crypto.pem",
-			},
-			wantErr: false,
-		},
-		{
-			name:          "invalid JSON returns error",
-			configContent: `{ invalid json `,
-			initialFlags:  nil,
-			wantErr:       true,
-		},
-		{
-			name: "no override if flags already set",
-			configContent: `{
-				"address": "127.0.0.1:9090",
-				"database_dsn": "user:pass@/dbname",
-				"store_interval": 60,
-				"store_file": "/tmp/store.json",
-				"restore": true,
-				"key": "secretkey",
-				"crypto_key": "/tmp/crypto.pem"
-			}`,
-			initialFlags: map[string]interface{}{
-				"flagServerAddress":   "0.0.0.0:8080",
-				"flagDatabaseDSN":     "existingDSN",
-				"flagStoreInterval":   120,
-				"flagFileStoragePath": "/existing/path",
-				"flagRestore":         true,
-				"flagKey":             "existingkey",
-				"flagCryptoKey":       "/existing/crypto.pem",
-			},
-			wantFlags: map[string]interface{}{
-				"flagServerAddress":   "0.0.0.0:8080",
-				"flagDatabaseDSN":     "existingDSN",
-				"flagStoreInterval":   120,
-				"flagFileStoragePath": "/existing/path",
-				"flagRestore":         true,
-				"flagKey":             "existingkey",
-				"flagCryptoKey":       "/existing/crypto.pem",
-			},
-			wantErr: false,
-		},
-		{
-			name: "partial override",
-			configContent: `{
-				"address": "192.168.1.1:7070",
-				"key": "partialkey"
-			}`,
-			initialFlags: map[string]interface{}{
-				"flagStoreInterval": 120,
-			},
-			wantFlags: map[string]interface{}{
-				"flagServerAddress":   "192.168.1.1:7070",
-				"flagDatabaseDSN":     "",
-				"flagStoreInterval":   120,
-				"flagFileStoragePath": "",
-				"flagRestore":         false,
-				"flagKey":             "partialkey",
-				"flagCryptoKey":       "",
-			},
-			wantErr: false,
-		},
+	tmpFile, err := os.CreateTemp("", "test-config-*.json")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Now we use pointers for each field
+	cfg := configs.ServerConfig{
+		ServerAddress:   strPtr("127.0.0.1:9090"),
+		DatabaseDSN:     strPtr("config_dsn"),
+		StoreInterval:   intPtr(999),
+		FileStoragePath: strPtr("/tmp/file"),
+		Restore:         boolPtr(true),
+		Key:             strPtr("config_key"),
+		CryptoKey:       strPtr("/tmp/key.pem"),
+		TrustedSubnet:   strPtr("10.0.0.0/8"),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetTestFlags()
+	err = json.NewEncoder(tmpFile).Encode(cfg)
+	assert.NoError(t, err)
+	_ = tmpFile.Close()
 
-			// Set initial flags if any
-			if tt.initialFlags != nil {
-				if v, ok := tt.initialFlags["flagServerAddress"]; ok {
-					flagServerAddress = v.(string)
-				}
-				if v, ok := tt.initialFlags["flagDatabaseDSN"]; ok {
-					flagDatabaseDSN = v.(string)
-				}
-				if v, ok := tt.initialFlags["flagStoreInterval"]; ok {
-					flagStoreInterval = v.(int)
-				}
-				if v, ok := tt.initialFlags["flagFileStoragePath"]; ok {
-					flagFileStoragePath = v.(string)
-				}
-				if v, ok := tt.initialFlags["flagRestore"]; ok {
-					flagRestore = v.(bool)
-				}
-				if v, ok := tt.initialFlags["flagKey"]; ok {
-					flagKey = v.(string)
-				}
-				if v, ok := tt.initialFlags["flagCryptoKey"]; ok {
-					flagCryptoKey = v.(string)
-				}
-			}
+	flagConfigPath = tmpFile.Name()
+	err = parseConfigFile()
+	assert.NoError(t, err)
 
-			if tt.configContent != "" {
-				path := writeTempConfig(t, tt.configContent)
-				defer os.Remove(path)
-				flagConfigPath = path
-			} else {
-				flagConfigPath = ""
-			}
+	assert.Equal(t, "127.0.0.1:9090", flagServerAddress)
+	assert.Equal(t, "config_dsn", flagDatabaseDSN)
+	assert.Equal(t, 999, flagStoreInterval)
+	assert.Equal(t, "/tmp/file", flagFileStoragePath)
+	assert.True(t, flagRestore)
+	assert.Equal(t, "config_key", flagKey)
+	assert.Equal(t, "/tmp/key.pem", flagCryptoKey)
+	assert.Equal(t, "10.0.0.0/8", flagTrustedSubnet)
+}
 
-			err := parseConfigFile()
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
+func TestFlags_Success(t *testing.T) {
+	// Prepare environment variables
+	os.Setenv("ADDRESS", "localhost:9999")
+	os.Setenv("DATABASE_DSN", "env_dsn")
+	os.Setenv("STORE_INTERVAL", "100")
+	os.Setenv("FILE_STORAGE_PATH", "/env/path")
+	os.Setenv("RESTORE", "true")
+	os.Setenv("KEY", "env_key")
+	os.Setenv("CRYPTO_KEY", "/env/crypto.key")
+	os.Setenv("TRUSTED_SUBNET", "192.168.0.0/24")
 
-			// Check flags
-			assert.Equal(t, tt.wantFlags["flagServerAddress"], flagServerAddress)
-			assert.Equal(t, tt.wantFlags["flagDatabaseDSN"], flagDatabaseDSN)
-			assert.Equal(t, tt.wantFlags["flagStoreInterval"], flagStoreInterval)
-			assert.Equal(t, tt.wantFlags["flagFileStoragePath"], flagFileStoragePath)
-			assert.Equal(t, tt.wantFlags["flagRestore"], flagRestore)
-			assert.Equal(t, tt.wantFlags["flagKey"], flagKey)
-			assert.Equal(t, tt.wantFlags["flagCryptoKey"], flagCryptoKey)
-		})
+	defer func() {
+		os.Clearenv()
+	}()
+
+	// Create temporary config file
+	tmpFile, err := os.CreateTemp("", "config-*.json")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	cfg := configs.ServerConfig{
+		ServerAddress:   strPtr("127.0.0.1:9090"),
+		DatabaseDSN:     strPtr("config_dsn"),
+		StoreInterval:   intPtr(200),
+		FileStoragePath: strPtr("/config/path"),
+		Restore:         boolPtr(false),
+		Key:             strPtr("config_key"),
+		CryptoKey:       strPtr("/config/crypto.key"),
+		TrustedSubnet:   strPtr("10.0.0.0/8"),
 	}
+	err = json.NewEncoder(tmpFile).Encode(cfg)
+	assert.NoError(t, err)
+
+	flagConfigPath = tmpFile.Name()
+
+	err = flags()
+	assert.NoError(t, err)
+
+	// Env vars override config file values
+	assert.Equal(t, "localhost:9999", flagServerAddress)
+	assert.Equal(t, "env_dsn", flagDatabaseDSN)
+	assert.Equal(t, 100, flagStoreInterval)
+	assert.Equal(t, "/env/path", flagFileStoragePath)
+	assert.True(t, flagRestore)
+	assert.Equal(t, "env_key", flagKey)
+	assert.Equal(t, "/env/crypto.key", flagCryptoKey)
+	assert.Equal(t, "192.168.0.0/24", flagTrustedSubnet)
+}
+
+func TestFlags_InvalidConfigPath(t *testing.T) {
+	os.Args = []string{"cmd", "-c", "/non/existent/path/config.json"}
+
+	err := flags()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no such file or directory")
 }

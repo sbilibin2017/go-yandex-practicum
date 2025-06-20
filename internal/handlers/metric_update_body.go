@@ -1,10 +1,11 @@
-package handlers
+package http
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/sbilibin2017/go-yandex-practicum/internal/errors"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
@@ -12,49 +13,52 @@ type MetricUpdateBodyService interface {
 	Updates(ctx context.Context, metrics []*types.Metrics) ([]*types.Metrics, error)
 }
 
-func NewMetricUpdateBodyHandler(svc MetricUpdateBodyService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+type MetricUpdateBodyHandler struct {
+	svc MetricUpdateBodyService
+	val func(metrics *types.Metrics) error
+}
 
-		var req *types.Metrics
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+func NewMetricUpdateBodyHandler(
+	svc MetricUpdateBodyService,
+	val func(metrics *types.Metrics) error,
+) *MetricUpdateBodyHandler {
+	return &MetricUpdateBodyHandler{
+		svc: svc,
+		val: val,
+	}
+}
 
-		if req.ID == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+func (h *MetricUpdateBodyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var metric *types.Metrics
 
-		switch req.Type {
-		case types.Counter:
-			if req.Delta == nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		case types.Gauge:
-			if req.Value == nil {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-		metricsUpdated, err := svc.Updates(r.Context(), []*types.Metrics{req})
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	if err := h.val(metric); err != nil {
+		handleMetricUpdateBodyError(w, err)
+		return
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+	_, err := h.svc.Updates(r.Context(), []*types.Metrics{metric})
+	if err != nil {
+		handleMetricUpdateBodyError(w, err)
+		return
+	}
 
-		if err := json.NewEncoder(w).Encode(metricsUpdated[0]); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleMetricUpdateBodyError(w http.ResponseWriter, err error) {
+	switch err {
+	case errors.ErrMetricIDRequired:
+		w.WriteHeader(http.StatusNotFound)
+	case errors.ErrUnsupportedMetricType,
+		errors.ErrCounterValueRequired,
+		errors.ErrGaugeValueRequired:
+		w.WriteHeader(http.StatusBadRequest)
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

@@ -1,11 +1,11 @@
-package handlers
+package http
 
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/sbilibin2017/go-yandex-practicum/internal/errors"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
@@ -13,50 +13,59 @@ type MetricGetPathService interface {
 	Get(ctx context.Context, metricID types.MetricID) (*types.Metrics, error)
 }
 
-func NewMetricGetPathHandler(svc MetricGetPathService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		mType := chi.URLParam(r, "type")
+type MetricGetPathHandler struct {
+	svc MetricGetPathService
+	val func(mType string, mName string) error
+}
 
-		if id == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+func NewMetricGetPathHandler(
+	svc MetricGetPathService,
+	val func(mType string, mName string) error,
+) *MetricGetPathHandler {
+	return &MetricGetPathHandler{
+		svc: svc,
+		val: val,
+	}
+}
 
-		if mType != types.Counter && mType != types.Gauge {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+func (h *MetricGetPathHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	mType := chi.URLParam(r, "type")
+	mName := chi.URLParam(r, "name")
 
-		metricID := types.MetricID{
-			ID:   id,
-			Type: mType,
-		}
+	err := h.val(mType, mName)
+	if err != nil {
+		handleMetricGetPathError(w, err)
+		return
+	}
 
-		metric, err := svc.Get(r.Context(), metricID)
+	metricID := types.MetricID{
+		ID:    mName,
+		MType: mType,
+	}
 
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	metric, err := h.svc.Get(r.Context(), metricID)
+	if err != nil {
+		handleMetricGetPathError(w, err)
+		return
+	}
 
-		if metric == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+	if metric == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 
-		var value string
-		if metric.Type == types.Counter {
-			if metric.Delta != nil {
-				value = strconv.FormatInt(*metric.Delta, 10)
-			}
-		} else if metric.Type == types.Gauge {
-			if metric.Value != nil {
-				value = strconv.FormatFloat(*metric.Value, 'f', -1, 64)
-			}
-		}
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(types.NewMetricString(metric)))
+}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(value))
+func handleMetricGetPathError(w http.ResponseWriter, err error) {
+	switch err {
+	case errors.ErrMetricNameRequired:
+		w.WriteHeader(http.StatusNotFound)
+	case errors.ErrUnsupportedMetricType:
+		w.WriteHeader(http.StatusBadRequest)
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

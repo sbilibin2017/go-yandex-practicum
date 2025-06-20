@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sbilibin2017/go-yandex-practicum/internal/configs"
 	"github.com/spf13/pflag"
 )
 
@@ -17,37 +18,51 @@ const (
 
 var (
 	flagServerAddress  string
+	flagHeader         string
 	flagPollInterval   int
 	flagReportInterval int
 	flagKey            string
 	flagRateLimit      int
 	flagCryptoKey      string
+	flagBatchSize      int
 	flagConfigPath     string
 )
 
-func init() {
-	parseFlags()
-	if err := parseConfigFile(); err != nil {
-		panic(err)
+func flags() error {
+	if err := parseFlags(); err != nil {
+		return err
 	}
-	parseEnv()
+	if err := parseConfigFile(); err != nil {
+		return err
+	}
+	if err := parseEnvs(); err != nil {
+		return err
+	}
+	return nil
 }
 
-func parseFlags() {
+func parseFlags() error {
+	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
+
 	pflag.StringVarP(&flagServerAddress, "address", "a", "http://localhost:8080", "Metrics server address")
+	pflag.StringVar(&flagHeader, "header", "", "Header name for metrics hash")
 	pflag.IntVarP(&flagPollInterval, "poll-interval", "p", 2, "Poll interval in seconds")
 	pflag.IntVarP(&flagReportInterval, "report-interval", "r", 10, "Report interval in seconds")
 	pflag.StringVarP(&flagKey, "key", "k", "", "Key for HMAC SHA256 hash")
 	pflag.IntVarP(&flagRateLimit, "rate-limit", "l", 0, "Max number of concurrent outgoing requests")
+	pflag.IntVar(&flagBatchSize, "batch-size", batchSize, "Batch size for metrics reporting")
 	pflag.StringVar(&flagCryptoKey, "crypto-key", "", "Path to public key file for encryption")
 	pflag.StringVarP(&flagConfigPath, "config", "c", "", "Path to config file")
 
-	pflag.Parse()
+	return pflag.CommandLine.Parse(os.Args[1:])
 }
 
-func parseEnv() {
+func parseEnvs() error {
 	if env := os.Getenv("ADDRESS"); env != "" {
 		flagServerAddress = env
+	}
+	if env := os.Getenv("HEADER"); env != "" {
+		flagHeader = env
 	}
 	if env := os.Getenv("POLL_INTERVAL"); env != "" {
 		if v, err := strconv.Atoi(env); err == nil {
@@ -67,12 +82,18 @@ func parseEnv() {
 			flagRateLimit = v
 		}
 	}
+	if env := os.Getenv("BATCH_SIZE"); env != "" {
+		if v, err := strconv.Atoi(env); err == nil {
+			flagBatchSize = v
+		}
+	}
 	if env := os.Getenv("CRYPTO_KEY"); env != "" {
 		flagCryptoKey = env
 	}
 	if env := os.Getenv("CONFIG"); env != "" {
 		flagConfigPath = env
 	}
+	return nil
 }
 
 func parseConfigFile() error {
@@ -86,47 +107,41 @@ func parseConfigFile() error {
 	}
 	defer file.Close()
 
-	var cfg struct {
-		Address        string `json:"address"`
-		ReportInterval string `json:"report_interval"`
-		PollInterval   string `json:"poll_interval"`
-		Key            string `json:"key"`
-		RateLimit      int    `json:"rate_limit"`
-		CryptoKey      string `json:"crypto_key"`
-	}
+	var cfg configs.AgentConfig
 
 	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
 		return err
 	}
 
-	if cfg.Address != "" && flagServerAddress == "http://localhost:8080" {
-		flagServerAddress = cfg.Address
+	if cfg.ServerAddress != nil {
+		flagServerAddress = *cfg.ServerAddress
 	}
-	if cfg.ReportInterval != "" && flagReportInterval == 10 {
-		if d, err := parseDurationToSeconds(cfg.ReportInterval); err == nil {
-			flagReportInterval = d
-		}
+	if cfg.Header != nil {
+		flagHeader = *cfg.Header
 	}
-	if cfg.PollInterval != "" && flagPollInterval == 2 {
-		if d, err := parseDurationToSeconds(cfg.PollInterval); err == nil {
-			flagPollInterval = d
-		}
+	if cfg.ReportInterval != nil {
+		flagReportInterval = *cfg.ReportInterval
 	}
-	if cfg.Key != "" && flagKey == "" {
-		flagKey = cfg.Key
+	if cfg.PollInterval != nil {
+		flagPollInterval = *cfg.PollInterval
 	}
-	if cfg.RateLimit != 0 && flagRateLimit == 0 {
-		flagRateLimit = cfg.RateLimit
+	if cfg.Key != nil {
+		flagKey = *cfg.Key
 	}
-	if cfg.CryptoKey != "" && flagCryptoKey == "" {
-		flagCryptoKey = cfg.CryptoKey
+	if cfg.RateLimit != nil {
+		flagRateLimit = *cfg.RateLimit
+	}
+	if cfg.BatchSize != nil {
+		flagBatchSize = *cfg.BatchSize
+	}
+	if cfg.CryptoKeyPath != nil {
+		flagCryptoKey = *cfg.CryptoKeyPath
 	}
 
 	return nil
 }
 
 func parseDurationToSeconds(dur string) (int, error) {
-	// Support both simple integer seconds or duration strings like "10s"
 	if seconds, err := strconv.Atoi(dur); err == nil {
 		return seconds, nil
 	}

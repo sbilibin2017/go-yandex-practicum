@@ -16,7 +16,7 @@ type MetricListAllRepository interface {
 	// Возвращает:
 	//   - срез метрик.
 	//   - ошибку в случае неудачи.
-	ListAll(ctx context.Context) ([]types.Metrics, error)
+	ListAll(ctx context.Context) ([]*types.Metrics, error)
 }
 
 // MetricListAllService реализует бизнес-логику получения всех метрик.
@@ -34,7 +34,7 @@ func NewMetricListAllService(
 
 func (svc *MetricListAllService) ListAll(
 	ctx context.Context,
-) ([]types.Metrics, error) {
+) ([]*types.Metrics, error) {
 	metrics, err := svc.mlar.ListAll(ctx)
 	if err != nil {
 		return nil, err

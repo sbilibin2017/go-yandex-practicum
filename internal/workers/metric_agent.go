@@ -2,26 +2,12 @@ package workers
 
 import (
 	"context"
-	"crypto/hmac"
-	cryptoRand "crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
-	"encoding/pem"
-	"errors"
-	"fmt"
 	"math/rand"
-	"net"
-	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -29,26 +15,30 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	client *resty.Client
-)
-
-func init() {
-	client = resty.New()
-
+type MetricUpdater interface {
+	Updates(ctx context.Context, metrics []*types.Metrics) error
 }
 
 type result struct {
-	Data []types.Metrics
+	Data []*types.Metrics
 	Err  error
 }
 
-func StartMetricAgent(
+func NewMetricAgentWorker(
+	updater MetricUpdater,
+	pollInterval int,
+	reportInterval int,
+	batchSize int,
+	rateLimit int,
+) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		return startMetricAgent(ctx, updater, pollInterval, reportInterval, batchSize, rateLimit)
+	}
+}
+
+func startMetricAgent(
 	ctx context.Context,
-	serverAddress string,
-	header string,
-	key string,
-	cryptoKeyPath string,
+	updater MetricUpdater,
 	pollInterval int,
 	reportInterval int,
 	batchSize int,
@@ -56,7 +46,7 @@ func StartMetricAgent(
 ) error {
 
 	metricsCh := startMetricsPolling(ctx, pollInterval)
-	resultsCh := startMetricsReporting(ctx, sendRequest, reportInterval, serverAddress, header, key, cryptoKeyPath, metricsCh, batchSize, rateLimit)
+	resultsCh := startMetricsReporting(ctx, updater, reportInterval, metricsCh, batchSize, rateLimit)
 	return logResults(ctx, resultsCh)
 }
 
@@ -89,18 +79,13 @@ func startMetricsPolling(ctx context.Context, pollInterval int) <-chan types.Met
 
 func startMetricsReporting(
 	ctx context.Context,
-	handler func(ctx context.Context, urlPath string, body []byte, headerName string, hashSum string) error,
+	updater MetricUpdater,
 	reportInterval int,
-	serverAddress string,
-	header string,
-	key string,
-	cryptoKeyPath string,
 	in <-chan types.Metrics,
 	batchSize int,
 	rateLimit int,
 ) <-chan result {
 	resultsCh := make(chan result, 100)
-
 	ticker := time.NewTicker(time.Duration(reportInterval) * time.Second)
 
 	go func() {
@@ -112,18 +97,7 @@ func startMetricsReporting(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				results := workerPoolMetricsUpdate(
-					ctx,
-					handler,
-					serverAddress,
-					header,
-					key,
-					cryptoKeyPath,
-					in,
-					batchSize,
-					rateLimit,
-				)
-
+				results := workerPoolMetricsUpdate(ctx, updater, in, batchSize, rateLimit)
 				for res := range results {
 					resultsCh <- res
 				}
@@ -132,6 +106,97 @@ func startMetricsReporting(
 	}()
 
 	return resultsCh
+}
+
+func workerMetricsUpdate(
+	ctx context.Context,
+	updater MetricUpdater,
+	jobs <-chan types.Metrics,
+	batchSize int,
+) <-chan result {
+	results := make(chan result, 100)
+
+	go func() {
+		defer close(results)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case m, ok := <-jobs:
+				if !ok {
+					return
+				}
+
+				batch := []*types.Metrics{&m}
+
+			collectLoop:
+				for len(batch) < batchSize {
+					m, ok := <-jobs
+					if !ok {
+						break collectLoop
+					}
+					batch = append(batch, &m)
+				}
+
+				err := updater.Updates(ctx, batch)
+
+				results <- result{
+					Data: batch,
+					Err:  err,
+				}
+			}
+		}
+	}()
+
+	return results
+}
+
+func workerPoolMetricsUpdate(
+	ctx context.Context,
+	updater MetricUpdater,
+	jobs <-chan types.Metrics,
+	batchSize int,
+	rateLimit int,
+) chan result {
+	results := make(chan result)
+	var wg sync.WaitGroup
+	wg.Add(rateLimit)
+
+	for i := 0; i < rateLimit; i++ {
+		go func() {
+			defer wg.Done()
+			workerResults := workerMetricsUpdate(ctx, updater, jobs, batchSize)
+			for r := range workerResults {
+				results <- r
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	return results
+}
+
+func logResults(ctx context.Context, results <-chan result) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case res, ok := <-results:
+			if !ok {
+				return ctx.Err()
+			}
+			if res.Err != nil {
+				logger.Log.Error("worker pool task error", zap.Error(res.Err), zap.Any("data", res.Data))
+			} else {
+				logger.Log.Info("worker pool task success", zap.Any("data", res.Data))
+			}
+		}
+	}
 }
 
 func getRuntimeGaugeMetrics() []types.Metrics {
@@ -168,34 +233,34 @@ func getRuntimeGaugeMetrics() []types.Metrics {
 	v28 := rand.Float64()
 
 	return []types.Metrics{
-		{ID: "Alloc", Type: types.Gauge, Value: &v1},
-		{ID: "BuckHashSys", Type: types.Gauge, Value: &v2},
-		{ID: "Frees", Type: types.Gauge, Value: &v3},
-		{ID: "GCCPUFraction", Type: types.Gauge, Value: &v4},
-		{ID: "GCSys", Type: types.Gauge, Value: &v5},
-		{ID: "HeapAlloc", Type: types.Gauge, Value: &v6},
-		{ID: "HeapIdle", Type: types.Gauge, Value: &v7},
-		{ID: "HeapInuse", Type: types.Gauge, Value: &v8},
-		{ID: "HeapObjects", Type: types.Gauge, Value: &v9},
-		{ID: "HeapReleased", Type: types.Gauge, Value: &v10},
-		{ID: "HeapSys", Type: types.Gauge, Value: &v11},
-		{ID: "LastGC", Type: types.Gauge, Value: &v12},
-		{ID: "Lookups", Type: types.Gauge, Value: &v13},
-		{ID: "MCacheInuse", Type: types.Gauge, Value: &v14},
-		{ID: "MCacheSys", Type: types.Gauge, Value: &v15},
-		{ID: "MSpanInuse", Type: types.Gauge, Value: &v16},
-		{ID: "MSpanSys", Type: types.Gauge, Value: &v17},
-		{ID: "Mallocs", Type: types.Gauge, Value: &v18},
-		{ID: "NextGC", Type: types.Gauge, Value: &v19},
-		{ID: "NumForcedGC", Type: types.Gauge, Value: &v20},
-		{ID: "NumGC", Type: types.Gauge, Value: &v21},
-		{ID: "OtherSys", Type: types.Gauge, Value: &v22},
-		{ID: "PauseTotalNs", Type: types.Gauge, Value: &v23},
-		{ID: "StackInuse", Type: types.Gauge, Value: &v24},
-		{ID: "StackSys", Type: types.Gauge, Value: &v25},
-		{ID: "Sys", Type: types.Gauge, Value: &v26},
-		{ID: "TotalAlloc", Type: types.Gauge, Value: &v27},
-		{ID: "RandomValue", Type: types.Gauge, Value: &v28},
+		{ID: "Alloc", MType: types.Gauge, Value: &v1},
+		{ID: "BuckHashSys", MType: types.Gauge, Value: &v2},
+		{ID: "Frees", MType: types.Gauge, Value: &v3},
+		{ID: "GCCPUFraction", MType: types.Gauge, Value: &v4},
+		{ID: "GCSys", MType: types.Gauge, Value: &v5},
+		{ID: "HeapAlloc", MType: types.Gauge, Value: &v6},
+		{ID: "HeapIdle", MType: types.Gauge, Value: &v7},
+		{ID: "HeapInuse", MType: types.Gauge, Value: &v8},
+		{ID: "HeapObjects", MType: types.Gauge, Value: &v9},
+		{ID: "HeapReleased", MType: types.Gauge, Value: &v10},
+		{ID: "HeapSys", MType: types.Gauge, Value: &v11},
+		{ID: "LastGC", MType: types.Gauge, Value: &v12},
+		{ID: "Lookups", MType: types.Gauge, Value: &v13},
+		{ID: "MCacheInuse", MType: types.Gauge, Value: &v14},
+		{ID: "MCacheSys", MType: types.Gauge, Value: &v15},
+		{ID: "MSpanInuse", MType: types.Gauge, Value: &v16},
+		{ID: "MSpanSys", MType: types.Gauge, Value: &v17},
+		{ID: "Mallocs", MType: types.Gauge, Value: &v18},
+		{ID: "NextGC", MType: types.Gauge, Value: &v19},
+		{ID: "NumForcedGC", MType: types.Gauge, Value: &v20},
+		{ID: "NumGC", MType: types.Gauge, Value: &v21},
+		{ID: "OtherSys", MType: types.Gauge, Value: &v22},
+		{ID: "PauseTotalNs", MType: types.Gauge, Value: &v23},
+		{ID: "StackInuse", MType: types.Gauge, Value: &v24},
+		{ID: "StackSys", MType: types.Gauge, Value: &v25},
+		{ID: "Sys", MType: types.Gauge, Value: &v26},
+		{ID: "TotalAlloc", MType: types.Gauge, Value: &v27},
+		{ID: "RandomValue", MType: types.Gauge, Value: &v28},
 	}
 }
 
@@ -205,7 +270,7 @@ func getRuntimeCounterMetrics() []types.Metrics {
 	return []types.Metrics{
 		{
 			ID:    "PollCount",
-			Type:  types.Counter,
+			MType: types.Counter,
 			Delta: &pollCount,
 		},
 	}
@@ -220,12 +285,12 @@ func getGoputilMetrics(ctx context.Context) []types.Metrics {
 
 		result = append(result, types.Metrics{
 			ID:    "TotalMemory",
-			Type:  types.Gauge,
+			MType: types.Gauge,
 			Value: &total,
 		})
 		result = append(result, types.Metrics{
 			ID:    "FreeMemory",
-			Type:  types.Gauge,
+			MType: types.Gauge,
 			Value: &free,
 		})
 	}
@@ -236,7 +301,7 @@ func getGoputilMetrics(ctx context.Context) []types.Metrics {
 			id := "CPUutilization" + strconv.Itoa(i)
 			result = append(result, types.Metrics{
 				ID:    id,
-				Type:  types.Gauge,
+				MType: types.Gauge,
 				Value: &p,
 			})
 		}
@@ -299,237 +364,4 @@ func fanInMetrics(ctx context.Context, resultChs ...chan types.Metrics) chan typ
 	}()
 
 	return finalCh
-}
-
-func workerMetricsUpdate(
-	ctx context.Context,
-	handler func(ctx context.Context, urlPath string, body []byte, headerName string, hashSum string) error,
-	serverAddress string,
-	header string,
-	key string,
-	cryptoKeyPath string,
-	jobs <-chan types.Metrics,
-	batchSize int,
-) <-chan result {
-	results := make(chan result)
-
-	go func() {
-		defer close(results)
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case m, ok := <-jobs:
-				if !ok {
-					return
-				}
-
-				batch := []types.Metrics{m}
-
-			collectLoop:
-				for len(batch) < batchSize {
-					m, ok := <-jobs
-					if !ok {
-						break collectLoop
-					}
-					batch = append(batch, m)
-				}
-
-				err := updates(ctx, handler, serverAddress, header, key, cryptoKeyPath, batch)
-
-				results <- result{
-					Data: batch,
-					Err:  err,
-				}
-			}
-		}
-	}()
-
-	return results
-}
-
-func workerPoolMetricsUpdate(
-	ctx context.Context,
-	handler func(ctx context.Context, urlPath string, body []byte, headerName string, hashSum string) error,
-	serverAddress string,
-	header string,
-	key string,
-	cryptoKeyPath string,
-	jobs <-chan types.Metrics,
-	batchSize int,
-	rateLimit int,
-) chan result {
-	results := make(chan result)
-	var wg sync.WaitGroup
-	wg.Add(rateLimit)
-
-	// fan-in all workers results into results chan
-	for i := 0; i < rateLimit; i++ {
-		go func() {
-			defer wg.Done()
-			workerResults := workerMetricsUpdate(ctx, handler, serverAddress, header, key, cryptoKeyPath, jobs, batchSize)
-			for r := range workerResults {
-				results <- r
-			}
-		}()
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	return results
-}
-
-func logResults(ctx context.Context, results <-chan result) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case res, ok := <-results:
-			if !ok {
-				return ctx.Err()
-			}
-			if res.Err != nil {
-				logger.Log.Error("worker pool task error", zap.Error(res.Err), zap.Any("data", res.Data))
-			} else {
-				logger.Log.Info("worker pool task success", zap.Any("data", res.Data))
-			}
-		}
-	}
-}
-
-func updates(
-	ctx context.Context,
-	handler func(ctx context.Context, urlPath string, body []byte, headerName string, hashSum string) error,
-	serverAddress string,
-	header string,
-	key string,
-	cryptoKeyPath string,
-	metrics []types.Metrics,
-) error {
-	if !strings.HasPrefix(serverAddress, "http://") && !strings.HasPrefix(serverAddress, "https://") {
-		serverAddress = "http://" + serverAddress
-	}
-
-	client.SetBaseURL(serverAddress)
-
-	var pubKey *rsa.PublicKey
-	var err error
-	if cryptoKeyPath != "" {
-		pubKey, err = loadPublicKey(cryptoKeyPath)
-		if err != nil {
-			return fmt.Errorf("failed to load public key: %w", err)
-		}
-	}
-
-	if len(metrics) == 0 {
-		return nil
-	}
-
-	bodyBytes, err := json.Marshal(metrics)
-	if err != nil {
-		return err
-	}
-
-	var hashSum string
-	if key != "" {
-		hashSum = calcBodyHashSum(bodyBytes, key)
-	}
-
-	if pubKey != nil {
-		bodyBytes, err = encryptBody(bodyBytes, pubKey)
-		if err != nil {
-			return fmt.Errorf("failed to encrypt metrics payload: %w", err)
-		}
-	}
-
-	return handler(ctx, "/updates/", bodyBytes, header, hashSum)
-}
-
-func sendRequest(
-	ctx context.Context,
-	urlPath string,
-	body []byte,
-	headerName string,
-	hashSum string,
-) error {
-	req := client.R().
-		SetContext(ctx).
-		SetHeader("Content-Type", "application/json").
-		SetHeader("Accept-Encoding", "gzip").
-		SetBody(body)
-
-	hostIP := extractIP(urlPath)
-	if hostIP != "" {
-		req.SetHeader("X-Real-IP", hostIP)
-	}
-
-	if headerName != "" && hashSum != "" {
-		req.SetHeader(headerName, hashSum)
-	}
-
-	resp, err := req.Post(urlPath)
-	if err != nil {
-		return fmt.Errorf("failed to send metrics: %w", err)
-	}
-
-	if resp.StatusCode() >= 400 {
-		return fmt.Errorf("server error %d: %s", resp.StatusCode(), resp.String())
-	}
-
-	return nil
-}
-
-func loadPublicKey(path string) (*rsa.PublicKey, error) {
-	keyBytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	block, _ := pem.Decode(keyBytes)
-	if block == nil {
-		return nil, errors.New("failed to decode PEM block")
-	}
-
-	pubInterface, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		return nil, err
-	}
-
-	pubKey, ok := pubInterface.(*rsa.PublicKey)
-	if !ok {
-		return nil, errors.New("not RSA public key")
-	}
-
-	return pubKey, nil
-}
-
-func calcBodyHashSum(body []byte, key string) string {
-	mac := hmac.New(sha256.New, []byte(key))
-	mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-func encryptBody(body []byte, pubKey *rsa.PublicKey) ([]byte, error) {
-	encryptedBytes, err := rsa.EncryptOAEP(sha256.New(), cryptoRand.Reader, pubKey, body, nil)
-	if err != nil {
-		return nil, err
-	}
-	return encryptedBytes, nil
-}
-
-func extractIP(address string) string {
-	host := address
-	if strings.Contains(address, ":") {
-		host, _, _ = net.SplitHostPort(address)
-	}
-
-	if host == "" || host == "localhost" {
-		return ""
-	}
-
-	return host
 }

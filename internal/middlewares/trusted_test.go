@@ -10,7 +10,7 @@ import (
 
 func TestNewTrustedSubnetMiddleware(t *testing.T) {
 	trustedCIDR := "192.168.1.0/24"
-	middleware := TrustedSubnetMiddleware(trustedCIDR)
+	middleware := TrustedSubnetMiddleware(&trustedCIDR)
 
 	// Тестовый хендлер, который будет вызван, если middleware пропустит запрос
 	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -18,49 +18,51 @@ func TestNewTrustedSubnetMiddleware(t *testing.T) {
 	})
 
 	// helper функция для выполнения запроса с заданным X-Real-IP
-	doRequest := func(ip string) *httptest.ResponseRecorder {
+	doRequest := func(ip string, mw func(http.Handler) http.Handler) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		if ip != "" {
 			req.Header.Set("X-Real-IP", ip)
 		}
 
 		rr := httptest.NewRecorder()
-		handler := middleware(okHandler)
+		handler := mw(okHandler)
 		handler.ServeHTTP(rr, req)
 
 		return rr
 	}
 
 	t.Run("valid IP inside subnet", func(t *testing.T) {
-		rr := doRequest("192.168.1.42")
+		rr := doRequest("192.168.1.42", middleware)
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 
 	t.Run("valid IP outside subnet", func(t *testing.T) {
-		rr := doRequest("10.0.0.1")
+		rr := doRequest("10.0.0.1", middleware)
 		assert.Equal(t, http.StatusForbidden, rr.Code)
 	})
 
 	t.Run("missing X-Real-IP header", func(t *testing.T) {
-		rr := doRequest("")
+		rr := doRequest("", middleware)
 		assert.Equal(t, http.StatusForbidden, rr.Code)
 	})
 
 	t.Run("invalid IP format", func(t *testing.T) {
-		rr := doRequest("not-an-ip")
+		rr := doRequest("not-an-ip", middleware)
 		assert.Equal(t, http.StatusForbidden, rr.Code)
 	})
 
-	t.Run("invalid CIDR disables all requests", func(t *testing.T) {
-		// Middleware с некорректным CIDR
-		badMiddleware := TrustedSubnetMiddleware("invalid-cidr")
+	t.Run("nil trustedSubnet disables check and allows all requests", func(t *testing.T) {
+		mw := TrustedSubnetMiddleware(nil)
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Set("X-Real-IP", "192.168.1.42")
-		rr := httptest.NewRecorder()
-		handler := badMiddleware(okHandler)
-		handler.ServeHTTP(rr, req)
+		rr := doRequest("any-ip", mw)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
 
-		assert.Equal(t, http.StatusForbidden, rr.Code)
+	t.Run("invalid CIDR disables check and allows all requests", func(t *testing.T) {
+		badCIDR := "invalid-cidr"
+		mw := TrustedSubnetMiddleware(&badCIDR)
+
+		rr := doRequest("192.168.1.42", mw)
+		assert.Equal(t, http.StatusOK, rr.Code)
 	})
 }

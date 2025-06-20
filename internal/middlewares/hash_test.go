@@ -26,7 +26,7 @@ func TestHashMiddleware_BodyReadError(t *testing.T) {
 
 	brokenBody := &brokenReader{}
 
-	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := HashMiddleware(&key, &header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler should not be called if body read fails")
 	}))
 
@@ -38,7 +38,6 @@ func TestHashMiddleware_BodyReadError(t *testing.T) {
 	resp := w.Result()
 	defer resp.Body.Close()
 
-	// Body will be empty now, since middleware does not write error message
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 
@@ -56,7 +55,7 @@ func TestHashMiddleware_EmptyKey_ReturnsNext(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	handler := HashMiddleware(key, header)(next)
+	handler := HashMiddleware(&key, &header)(next)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -74,7 +73,7 @@ func TestHashMiddleware_ValidHash(t *testing.T) {
 	key := "secretkey"
 	header := "X-Hash"
 
-	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := HashMiddleware(&key, &header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		w.Write(bodyBytes)
@@ -108,7 +107,7 @@ func TestHashMiddleware_MissingHash(t *testing.T) {
 	key := "secretkey"
 	header := "X-Hash"
 
-	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := HashMiddleware(&key, &header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		w.Write(bodyBytes)
@@ -128,7 +127,7 @@ func TestHashMiddleware_MissingHash(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, string(body), string(respBody))
+	assert.Equal(t, string(respBody), string(body))
 
 	mac := hmac.New(sha256.New, []byte(key))
 	mac.Write(body)
@@ -140,7 +139,7 @@ func TestHashMiddleware_InvalidHash(t *testing.T) {
 	key := "secretkey"
 	header := "X-Hash"
 
-	handler := HashMiddleware(key, header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := HashMiddleware(&key, &header)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler should not be called if hash mismatch")
 	}))
 

@@ -1,9 +1,11 @@
 package main
 
-import "context"
-
 func main() {
-	err := run(context.Background())
+	err := flags()
+	if err != nil {
+		panic(err)
+	}
+	err = run()
 	if err != nil {
 		panic(err)
 	}

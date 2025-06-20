@@ -1,55 +1,69 @@
-package handlers
+package http
 
 import (
 	"context"
 	"encoding/json"
 	"net/http"
 
+	"github.com/sbilibin2017/go-yandex-practicum/internal/errors"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
 )
 
-// MetricGetBodyService описывает сервис для получения метрики по ID,
-// где ID передаётся в теле запроса.
 type MetricGetBodyService interface {
-	// Get возвращает метрику по её ID или ошибку.
 	Get(ctx context.Context, metricID types.MetricID) (*types.Metrics, error)
 }
 
-func NewMetricGetBodyHandler(svc MetricGetBodyService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req types.MetricID
+type MetricGetBodyHandler struct {
+	svc MetricGetBodyService
+	val func(id types.MetricID) error
+}
 
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		defer r.Body.Close()
+func NewMetricGetBodyHandler(
+	svc MetricGetBodyService,
+	val func(id types.MetricID) error,
+) *MetricGetBodyHandler {
+	return &MetricGetBodyHandler{
+		svc: svc,
+		val: val,
+	}
+}
 
-		if req.ID == "" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		if req.Type != types.Counter && req.Type != types.Gauge {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+func (h *MetricGetBodyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var metricID types.MetricID
 
-		metric, err := svc.Get(r.Context(), req)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
+	if err := json.NewDecoder(r.Body).Decode(&metricID); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
-		if metric == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+	if err := h.val(metricID); err != nil {
+		handleMetricGetBodyError(w, err)
+		return
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+	metric, err := h.svc.Get(r.Context(), metricID)
+	if err != nil {
+		handleMetricGetBodyError(w, err)
+		return
+	}
 
-		if err := json.NewEncoder(w).Encode(metric); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
+	if metric == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(metric)
+}
+
+func handleMetricGetBodyError(w http.ResponseWriter, err error) {
+	switch err {
+	case errors.ErrMetricIDRequired,
+		errors.ErrMetricNameRequired:
+		w.WriteHeader(http.StatusNotFound)
+	case errors.ErrUnsupportedMetricType:
+		w.WriteHeader(http.StatusBadRequest)
+	default:
+		w.WriteHeader(http.StatusInternalServerError)
 	}
 }

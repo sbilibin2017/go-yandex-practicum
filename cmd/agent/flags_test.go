@@ -9,7 +9,8 @@ import (
 )
 
 func resetFlags() {
-	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ExitOnError)
+	// Reset CommandLine to new FlagSet with ContinueOnError (to match parseFlags)
+	pflag.CommandLine = pflag.NewFlagSet(os.Args[0], pflag.ContinueOnError)
 }
 
 func clearEnv(keys ...string) {
@@ -68,7 +69,7 @@ func TestParseFlags(t *testing.T) {
 			resetFlags()
 			os.Args = tt.args
 
-			// Reset vars to zero values before parsing
+			// Reset vars before parsing
 			flagServerAddress = ""
 			flagPollInterval = 0
 			flagReportInterval = 0
@@ -77,7 +78,8 @@ func TestParseFlags(t *testing.T) {
 			flagCryptoKey = ""
 			flagConfigPath = ""
 
-			parseFlags()
+			err := parseFlags()
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.wantAddress, flagServerAddress)
 			assert.Equal(t, tt.wantPoll, flagPollInterval)
@@ -144,10 +146,8 @@ func TestParseEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clear env first
 			clearEnv("ADDRESS", "POLL_INTERVAL", "REPORT_INTERVAL", "KEY", "RATE_LIMIT", "CRYPTO_KEY", "CONFIG")
 
-			// Set env vars for this test
 			for k, v := range tt.env {
 				os.Setenv(k, v)
 			}
@@ -161,7 +161,8 @@ func TestParseEnv(t *testing.T) {
 			flagCryptoKey = ""
 			flagConfigPath = ""
 
-			parseEnv()
+			err := parseEnvs()
+			assert.NoError(t, err)
 
 			assert.Equal(t, tt.wantAddress, flagServerAddress)
 			assert.Equal(t, tt.wantPoll, flagPollInterval)
@@ -222,12 +223,12 @@ func TestParseConfigFile(t *testing.T) {
 		{
 			name: "valid config overrides defaults",
 			configContent: `{
-				"address": "http://example.com",
-				"report_interval": "15s",
-				"poll_interval": "5",
+				"server_address": "http://example.com",
+				"report_interval": 15,
+				"poll_interval": 5,
 				"key": "secret",
 				"rate_limit": 7,
-				"crypto_key": "/path/to/crypto"
+				"crypto_key_path": "/path/to/crypto"
 			}`,
 			initialFlags: nil,
 			wantFlags: map[string]interface{}{
@@ -249,12 +250,12 @@ func TestParseConfigFile(t *testing.T) {
 		{
 			name: "no override if flags already set",
 			configContent: `{
-				"address": "http://example.com",
-				"report_interval": "15s",
-				"poll_interval": "5",
+				"server_address": "http://example.com",
+				"report_interval": 15,
+				"poll_interval": 5,
 				"key": "secret",
 				"rate_limit": 7,
-				"crypto_key": "/path/to/crypto"
+				"crypto_key_path": "/path/to/crypto"
 			}`,
 			initialFlags: map[string]interface{}{
 				"flagServerAddress":  "http://myserver",
@@ -277,7 +278,7 @@ func TestParseConfigFile(t *testing.T) {
 		{
 			name: "partial override",
 			configContent: `{
-				"address": "http://partial.com",
+				"server_address": "http://partial.com",
 				"key": "partialkey"
 			}`,
 			initialFlags: map[string]interface{}{
@@ -297,10 +298,8 @@ func TestParseConfigFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset global flags to defaults
 			resetTestFlags()
 
-			// Set initial flags if provided
 			if tt.initialFlags != nil {
 				if v, ok := tt.initialFlags["flagServerAddress"]; ok {
 					flagServerAddress = v.(string)
@@ -322,7 +321,6 @@ func TestParseConfigFile(t *testing.T) {
 				}
 			}
 
-			// Write config file if content given
 			if tt.configContent != "" {
 				path := writeTempConfig(t, tt.configContent)
 				defer os.Remove(path)
@@ -338,7 +336,6 @@ func TestParseConfigFile(t *testing.T) {
 			}
 			assert.NoError(t, err)
 
-			// Check all expected flags
 			for k, want := range tt.wantFlags {
 				switch k {
 				case "flagServerAddress":

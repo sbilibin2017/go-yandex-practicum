@@ -18,6 +18,7 @@ import (
 func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 	var privateKey *rsa.PrivateKey
 
+	// If keyPath is nil, skip loading key entirely
 	if keyPath != "" {
 		keyData, err := os.ReadFile(keyPath)
 		if err != nil {
@@ -37,6 +38,11 @@ func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if keyPath == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			encBody, err := io.ReadAll(r.Body)
 			r.Body.Close()
 			if err != nil {
@@ -50,23 +56,18 @@ func CryptoMiddleware(keyPath string) func(http.Handler) http.Handler {
 				return
 			}
 
-			var plainText []byte
-			if privateKey != nil {
-				cipherText, err := base64.StdEncoding.DecodeString(string(encBody))
-				if err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("invalid base64 body"))
-					return
-				}
+			cipherText, err := base64.StdEncoding.DecodeString(string(encBody))
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("invalid base64 body"))
+				return
+			}
 
-				plainText, err = rsa.DecryptPKCS1v15(rand.Reader, privateKey, cipherText)
-				if err != nil {
-					w.WriteHeader(http.StatusBadRequest)
-					w.Write([]byte("failed to decrypt body"))
-					return
-				}
-			} else {
-				plainText = encBody
+			plainText, err := rsa.DecryptPKCS1v15(rand.Reader, privateKey, cipherText)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("failed to decrypt body"))
+				return
 			}
 
 			r.Body = io.NopCloser(strings.NewReader(string(plainText)))
