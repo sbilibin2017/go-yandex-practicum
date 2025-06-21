@@ -9,12 +9,39 @@ import (
 	"net/http"
 )
 
-func HashMiddleware(
-	key string,
-	header string,
-) func(http.Handler) http.Handler {
+// HashOption is a functional option for configuring the hash middleware.
+type HashOption func(*hashMiddleware)
+
+// hashMiddleware holds middleware runtime configuration.
+type hashMiddleware struct {
+	key    string
+	header string
+}
+
+// WithHashKey sets the secret key for HMAC.
+func WithHashKey(key string) HashOption {
+	return func(mw *hashMiddleware) {
+		mw.key = key
+	}
+}
+
+// WithHashHeader sets the HTTP header used to send/verify hashes.
+func WithHashHeader(header string) HashOption {
+	return func(mw *hashMiddleware) {
+		mw.header = header
+	}
+}
+
+// HashMiddleware returns a middleware handler that verifies request body HMAC SHA256 and
+// adds response body HMAC SHA256 in the configured header.
+// If the key is empty, the middleware skips all processing.
+func HashMiddleware(opts ...HashOption) (func(http.Handler) http.Handler, error) {
+	mw := &hashMiddleware{}
+	for _, opt := range opts {
+		opt(mw)
+	}
 	return func(next http.Handler) http.Handler {
-		if key == "" || header == "" {
+		if mw.key == "" {
 			return next
 		}
 
@@ -27,9 +54,9 @@ func HashMiddleware(
 			r.Body.Close()
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-			receivedHash := r.Header.Get(header)
+			receivedHash := r.Header.Get(mw.header)
 			if receivedHash != "" {
-				mac := hmac.New(sha256.New, []byte(key))
+				mac := hmac.New(sha256.New, []byte(mw.key))
 				mac.Write(bodyBytes)
 				expectedMAC := mac.Sum(nil)
 				expectedHash := hex.EncodeToString(expectedMAC)
@@ -47,17 +74,18 @@ func HashMiddleware(
 
 			next.ServeHTTP(rw, r)
 
-			mac := hmac.New(sha256.New, []byte(key))
+			mac := hmac.New(sha256.New, []byte(mw.key))
 			mac.Write(rw.buf.Bytes())
 			respMAC := mac.Sum(nil)
 			respHash := hex.EncodeToString(respMAC)
 
-			w.Header().Set(header, respHash)
+			w.Header().Set(mw.header, respHash)
 			w.Write(rw.buf.Bytes())
 		})
-	}
+	}, nil
 }
 
+// responseWriterWithHash captures the response body for hash calculation.
 type responseWriterWithHash struct {
 	http.ResponseWriter
 	buf *bytes.Buffer

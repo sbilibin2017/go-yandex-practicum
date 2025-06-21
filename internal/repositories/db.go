@@ -2,148 +2,181 @@ package repositories
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-type MetricSaveDBRepository struct {
+// Generic Tx getter type
+type TxGetterFunc func(ctx context.Context) (*sqlx.Tx, bool)
+
+// --- MetricDBSaveRepository ---
+
+type MetricDBSaveRepository struct {
 	db       *sqlx.DB
-	txGetter func(ctx context.Context) *sqlx.Tx
+	TxGetter TxGetterFunc
 }
 
-func NewMetricSaveDBRepository(
-	db *sqlx.DB,
-	txGetter func(ctx context.Context) *sqlx.Tx,
-) *MetricSaveDBRepository {
-	return &MetricSaveDBRepository{
-		db:       db,
-		txGetter: txGetter,
+type MetricDBSaveRepositoryOption func(*MetricDBSaveRepository)
+
+func WithMetricDBSaveRepositoryDB(db *sqlx.DB) MetricDBSaveRepositoryOption {
+	return func(repo *MetricDBSaveRepository) {
+		repo.db = db
 	}
 }
 
-func (r *MetricSaveDBRepository) Save(
-	ctx context.Context, metric types.Metrics,
-) error {
-	args := map[string]any{
-		"id":    metric.ID,
-		"type":  metric.MType,
-		"delta": metric.Delta,
-		"value": metric.Value,
+func WithMetricDBSaveRepositoryTxGetter(getter TxGetterFunc) MetricDBSaveRepositoryOption {
+	return func(repo *MetricDBSaveRepository) {
+		repo.TxGetter = getter
+	}
+}
+
+func NewMetricDBSaveRepository(opts ...MetricDBSaveRepositoryOption) *MetricDBSaveRepository {
+	repo := &MetricDBSaveRepository{}
+	for _, opt := range opts {
+		opt(repo)
+	}
+	return repo
+}
+
+func (r *MetricDBSaveRepository) Save(ctx context.Context, metric types.Metrics) error {
+	var execer sqlx.ExtContext
+	if r.TxGetter != nil {
+		if tx, ok := r.TxGetter(ctx); ok && tx != nil {
+			execer = tx
+		}
+	}
+	if execer == nil {
+		execer = r.db
 	}
 
-	var executor sqlx.ExtContext
-	if tx := r.txGetter(ctx); tx != nil {
-		executor = tx
-	} else {
-		executor = r.db
-	}
-
-	_, err := sqlx.NamedExecContext(ctx, executor, metricSaveQuery, args)
+	_, err := execer.ExecContext(ctx, metricSaveQuery,
+		metric.ID,
+		metric.MType,
+		metric.Delta,
+		metric.Value,
+	)
 	return err
 }
 
 const metricSaveQuery = `
 INSERT INTO content.metrics (id, type, delta, value)
-VALUES (:id, :type, :delta, :value)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (id, type) DO UPDATE
-SET delta = EXCLUDED.delta,
-    value = EXCLUDED.value;
+    SET delta = EXCLUDED.delta,
+        value = EXCLUDED.value;
 `
 
-type MetricGetByIDDBRepository struct {
+// --- MetricDBGetRepository ---
+
+type MetricDBGetRepository struct {
 	db       *sqlx.DB
-	txGetter func(ctx context.Context) *sqlx.Tx
+	TxGetter TxGetterFunc
 }
 
-func NewMetricGetByIDDBRepository(
-	db *sqlx.DB,
-	txGetter func(ctx context.Context) *sqlx.Tx,
-) *MetricGetByIDDBRepository {
-	return &MetricGetByIDDBRepository{db: db, txGetter: txGetter}
-}
+type MetricDBGetRepositoryOption func(*MetricDBGetRepository)
 
-func (r *MetricGetByIDDBRepository) Get(
-	ctx context.Context,
-	id types.MetricID,
-) (*types.Metrics, error) {
-	args := map[string]any{
-		"id":   id.ID,
-		"type": id.MType,
+func WithMetricDBGetRepositoryDB(db *sqlx.DB) MetricDBGetRepositoryOption {
+	return func(repo *MetricDBGetRepository) {
+		repo.db = db
 	}
+}
 
-	var executor sqlx.ExtContext
-	if tx := r.txGetter(ctx); tx != nil {
-		executor = tx
-	} else {
-		executor = r.db
+func WithMetricDBGetRepositoryTxGetter(getter TxGetterFunc) MetricDBGetRepositoryOption {
+	return func(repo *MetricDBGetRepository) {
+		repo.TxGetter = getter
+	}
+}
+
+func NewMetricDBGetRepository(opts ...MetricDBGetRepositoryOption) *MetricDBGetRepository {
+	repo := &MetricDBGetRepository{}
+	for _, opt := range opts {
+		opt(repo)
+	}
+	return repo
+}
+
+func (r *MetricDBGetRepository) Get(ctx context.Context, id types.MetricID) (*types.Metrics, error) {
+	var querier sqlx.ExtContext
+	if r.TxGetter != nil {
+		if tx, ok := r.TxGetter(ctx); ok && tx != nil {
+			querier = tx
+		}
+	}
+	if querier == nil {
+		querier = r.db
 	}
 
 	var metric types.Metrics
-	rows, err := sqlx.NamedQueryContext(ctx, executor, metricGetByIDQuery, args)
+	err := sqlx.GetContext(ctx, querier, &metric, metricGetQuery, id.ID, id.MType)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	defer rows.Close()
-
-	if rows.Next() {
-		if err := rows.StructScan(&metric); err != nil {
-			return nil, err
-		}
-		return &metric, nil
-	}
-
-	return nil, nil
+	return &metric, nil
 }
 
-const metricGetByIDQuery = `
+const metricGetQuery = `
 SELECT id, type, delta, value
 FROM content.metrics
-WHERE id = :id AND type = :type;
+WHERE id = $1 AND type = $2;
 `
 
-type MetricListAllDBRepository struct {
+// --- MetricDBListRepository ---
+
+type MetricDBListRepository struct {
 	db       *sqlx.DB
-	txGetter func(ctx context.Context) *sqlx.Tx
+	TxGetter TxGetterFunc
 }
 
-func NewMetricListAllDBRepository(
-	db *sqlx.DB,
-	txGetter func(ctx context.Context) *sqlx.Tx,
-) *MetricListAllDBRepository {
-	return &MetricListAllDBRepository{
-		db:       db,
-		txGetter: txGetter,
+type MetricDBListRepositoryOption func(*MetricDBListRepository)
+
+func WithMetricDBListRepositoryDB(db *sqlx.DB) MetricDBListRepositoryOption {
+	return func(repo *MetricDBListRepository) {
+		repo.db = db
 	}
 }
 
-func (r *MetricListAllDBRepository) List(ctx context.Context) ([]*types.Metrics, error) {
-	var executor sqlx.ExtContext
-	if tx := r.txGetter(ctx); tx != nil {
-		executor = tx
-	} else {
-		executor = r.db
+func WithMetricDBListRepositoryTxGetter(getter TxGetterFunc) MetricDBListRepositoryOption {
+	return func(repo *MetricDBListRepository) {
+		repo.TxGetter = getter
+	}
+}
+
+func NewMetricDBListRepository(opts ...MetricDBListRepositoryOption) *MetricDBListRepository {
+	repo := &MetricDBListRepository{}
+	for _, opt := range opts {
+		opt(repo)
+	}
+	return repo
+}
+
+func (r *MetricDBListRepository) List(ctx context.Context) ([]*types.Metrics, error) {
+	var querier sqlx.ExtContext
+	if r.TxGetter != nil {
+		if tx, ok := r.TxGetter(ctx); ok && tx != nil {
+			querier = tx
+		}
+	}
+	if querier == nil {
+		querier = r.db
 	}
 
-	rows, err := sqlx.NamedQueryContext(ctx, executor, metricListAllQuery, map[string]interface{}{})
+	var metrics []*types.Metrics
+	err := sqlx.SelectContext(ctx, querier, &metrics, metricListQuery)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var metrics []*types.Metrics
-	for rows.Next() {
-		var metric types.Metrics
-		if err := rows.StructScan(&metric); err != nil {
-			return nil, err
-		}
-		metrics = append(metrics, &metric)
-	}
-
 	return metrics, nil
 }
 
-const metricListAllQuery = `
+const metricListQuery = `
 SELECT id, type, delta, value
 FROM content.metrics
 ORDER BY id;

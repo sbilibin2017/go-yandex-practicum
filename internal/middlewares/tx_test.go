@@ -1,6 +1,7 @@
-package middlewares
+package middlewares_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,139 +11,156 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 )
 
-func TestTxMiddleware_NoDB(t *testing.T) {
-	handlerCalled := false
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-		w.WriteHeader(http.StatusOK)
-	})
+// define custom type for context keys
+type ctxKey string
 
-	mw := TxMiddleware(nil)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	mw(handler).ServeHTTP(rr, req)
-
-	assert.True(t, handlerCalled, "handler should be called when DB is nil")
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestTxMiddleware_BeginFails(t *testing.T) {
+func setupMockDB(t *testing.T) (*sqlx.DB, sqlmock.Sqlmock, func()) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
-
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 
-	mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
+	cleanup := func() {
+		sqlxDB.Close()
+	}
 
-	mw := TxMiddleware(sqlxDB)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler should NOT be called if begin fails")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	mw(handler).ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rr.Code)
-	require.NoError(t, mock.ExpectationsWereMet())
+	return sqlxDB, mock, cleanup
 }
 
-func TestTxMiddleware_CommitSuccess(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
+func TestTxMiddleware_SuccessfulCommit(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
 	mock.ExpectBegin()
 	mock.ExpectCommit()
 
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
+	require.NoError(t, err)
+
 	handlerCalled := false
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
-		tx := GetTx(r.Context())
-		assert.NotNil(t, tx)
 		w.WriteHeader(http.StatusOK)
-	})
+		w.Write([]byte("ok"))
+	}))
 
-	mw := TxMiddleware(sqlxDB)
+	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
 
-	mw(handler).ServeHTTP(rr, req)
+	handler.ServeHTTP(rec, req)
 
 	assert.True(t, handlerCalled)
-	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "ok", rec.Body.String())
+
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestTxMiddleware_RollbackOnStatusCode400OrMore(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
+func TestTxMiddleware_BeginTxFails(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	mock.ExpectBegin().WillReturnError(errors.New("begin tx failed"))
+
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
+	require.NoError(t, err)
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called if begin tx fails")
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTxMiddleware_CommitFails_TriggersRollback(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
 	mock.ExpectBegin()
+	mock.ExpectCommit().WillReturnError(errors.New("commit failed"))
 	mock.ExpectRollback()
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-	})
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
+	require.NoError(t, err)
 
-	mw := TxMiddleware(sqlxDB)
+	handlerCalled := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("response"))
+	}))
+
+	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
 
-	mw(handler).ServeHTTP(rr, req)
+	handler.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-	require.NoError(t, mock.ExpectationsWereMet())
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestTxMiddleware_CommitError_SetsStatusCodeIfNoHeader(t *testing.T) {
-	db, mock, err := sqlmock.New()
+func TestTxMiddleware_NoDBConfigured_CallsNextDirectly(t *testing.T) {
+	middleware, err := middlewares.TxMiddleware() // no DB option
 	require.NoError(t, err)
-	defer db.Close()
 
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-
-	mock.ExpectBegin()
-	mock.ExpectCommit().WillReturnError(errors.New("commit failed"))
-
-	// Case 1: handler does NOT write header -> middleware sets 500
-	handler1 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// no header write here
-	})
-
-	mw := TxMiddleware(sqlxDB)
-	req1 := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr1 := httptest.NewRecorder()
-
-	mw(handler1).ServeHTTP(rr1, req1)
-	assert.Equal(t, http.StatusInternalServerError, rr1.Code)
-
-	require.NoError(t, mock.ExpectationsWereMet())
-
-	// Reset mock for second case
-	mock.ExpectBegin()
-	mock.ExpectCommit().WillReturnError(errors.New("commit failed"))
-
-	// Case 2: handler writes header already -> middleware does NOT override status code
-	handler2 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handlerCalled := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
 		w.WriteHeader(http.StatusOK)
-	})
+		w.Write([]byte("no db"))
+	}))
 
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr2 := httptest.NewRecorder()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	mw(handler2).ServeHTTP(rr2, req2)
-	assert.Equal(t, http.StatusOK, rr2.Code) // middleware does not override
+	handler.ServeHTTP(rec, req)
 
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no db", rec.Body.String())
+}
+
+func TestTxMiddleware_TxSetterInjectsTx(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	var capturedTx *sqlx.Tx
+
+	txSetter := func(ctx context.Context, tx *sqlx.Tx) context.Context {
+		capturedTx = tx
+		return context.WithValue(ctx, ctxKey("tx"), tx)
+	}
+
+	middleware, err := middlewares.TxMiddleware(
+		middlewares.WithDB(sqlxDB),
+		middlewares.WithTxSetter(txSetter),
+	)
+	require.NoError(t, err)
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		txFromCtx := r.Context().Value(ctxKey("tx"))
+		assert.NotNil(t, txFromCtx)
+		assert.Equal(t, capturedTx, txFromCtx)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

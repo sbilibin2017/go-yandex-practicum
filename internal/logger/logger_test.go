@@ -49,6 +49,18 @@ func TestInitialize_Initialize(t *testing.T) {
 	}
 }
 
+func TestSync(t *testing.T) {
+	err := Sync()
+	assert.NoError(t, err)
+
+	// Case 2: Log is a valid sugared logger
+	err = Initialize("info")
+	assert.NoError(t, err)
+
+	err = Sync()
+	assert.NoError(t, err)
+}
+
 func resetLogger() {
 	Log = nil
 }

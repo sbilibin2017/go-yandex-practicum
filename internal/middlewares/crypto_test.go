@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -10,115 +11,127 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func generateTestKeys(t *testing.T) (privateKeyPEM []byte, privateKey *rsa.PrivateKey) {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NoError(t, err)
+// helper to create temp private key file for tests
+func createTempPrivateKeyFile(t *testing.T) string {
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
 
-	privBytes := x509.MarshalPKCS1PrivateKey(priv)
-	privateKeyPEM = pem.EncodeToMemory(&pem.Block{
+	privBytes := x509.MarshalPKCS1PrivateKey(privKey)
+	pemBlock := &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: privBytes,
-	})
-	return privateKeyPEM, priv
+	}
+
+	tmpFile, err := os.CreateTemp("", "testkey_*.pem")
+	require.NoError(t, err)
+
+	// Correctly encode PEM block to the file
+	err = pem.Encode(tmpFile, pemBlock)
+	require.NoError(t, err)
+
+	err = tmpFile.Close()
+	require.NoError(t, err)
+
+	return tmpFile.Name()
 }
 
-func TestCryptoMiddleware_DecryptSuccess(t *testing.T) {
-	privPEM, privKey := generateTestKeys(t)
+func TestCryptoMiddleware(t *testing.T) {
+	keyPath := createTempPrivateKeyFile(t)
+	defer os.Remove(keyPath)
 
-	tmpFile := t.TempDir() + "/priv.pem"
-	err := os.WriteFile(tmpFile, privPEM, 0600)
-	assert.NoError(t, err)
+	privKey, err := loadPrivateKey(keyPath)
+	require.NoError(t, err)
+	pubKey := &privKey.PublicKey
 
-	middleware := CryptoMiddleware(&tmpFile)
+	plaintext := "test message"
 
-	plainText := []byte("secret data")
+	// encrypt plaintext with public key and base64 encode
+	cipherBytes, err := rsa.EncryptPKCS1v15(rand.Reader, pubKey, []byte(plaintext))
+	require.NoError(t, err)
 
-	cipherText, err := rsa.EncryptPKCS1v15(rand.Reader, &privKey.PublicKey, plainText)
-	assert.NoError(t, err)
+	encBody := base64.StdEncoding.EncodeToString(cipherBytes)
 
-	encoded := base64.StdEncoding.EncodeToString(cipherText)
+	type args struct {
+		keyPath  string
+		body     []byte
+		expected string
+		status   int
+	}
 
-	req := httptest.NewRequest("POST", "/", strings.NewReader(encoded))
-	rr := httptest.NewRecorder()
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "decrypts valid encrypted body",
+			args: args{
+				keyPath:  keyPath,
+				body:     []byte(encBody),
+				expected: plaintext,
+				status:   http.StatusOK,
+			},
+		},
+		{
+			name: "passes through empty body",
+			args: args{
+				keyPath:  keyPath,
+				body:     []byte(""),
+				expected: "",
+				status:   http.StatusOK,
+			},
+		},
+		{
+			name: "bad base64 returns 400",
+			args: args{
+				keyPath:  keyPath,
+				body:     []byte("invalid-base64$$"),
+				expected: "",
+				status:   http.StatusBadRequest,
+			},
+		},
+		{
+			name: "no key path disables decryption and passes body as is",
+			args: args{
+				keyPath:  "",
+				body:     []byte(plaintext),
+				expected: plaintext,
+				status:   http.StatusOK,
+			},
+		},
+	}
 
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		assert.NoError(t, err)
-		assert.Equal(t, plainText, body)
-		w.WriteHeader(http.StatusOK)
-	}))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			middleware, err := CryptoMiddleware(WithKeyPath(tt.args.keyPath))
+			require.NoError(t, err)
 
-	handler.ServeHTTP(rr, req)
-	assert.True(t, called)
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
+			handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bodyBytes, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				w.Write(bodyBytes)
+			}))
 
-func TestCryptoMiddleware_InvalidBase64(t *testing.T) {
-	privPEM, _ := generateTestKeys(t)
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(tt.args.body))
+			rec := httptest.NewRecorder()
 
-	tmpFile := t.TempDir() + "/priv.pem"
-	err := os.WriteFile(tmpFile, privPEM, 0600)
-	assert.NoError(t, err)
+			handler.ServeHTTP(rec, req)
 
-	middleware := CryptoMiddleware(&tmpFile)
+			resp := rec.Result()
+			defer resp.Body.Close()
 
-	req := httptest.NewRequest("POST", "/", strings.NewReader("%%%invalid_base64%%%"))
-	rr := httptest.NewRecorder()
+			assert.Equal(t, tt.args.status, resp.StatusCode)
 
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-	}))
-
-	handler.ServeHTTP(rr, req)
-	assert.False(t, called, "handler should not be called on invalid base64")
-	assert.Equal(t, 400, rr.Code)
-}
-
-func TestCryptoMiddleware_NoKey_PassesBodyAsIs(t *testing.T) {
-	// Pass nil to simulate no key path
-	middleware := CryptoMiddleware(nil)
-
-	plainText := "not encrypted body"
-
-	req := httptest.NewRequest("POST", "/", strings.NewReader(plainText))
-	rr := httptest.NewRecorder()
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		body, err := io.ReadAll(r.Body)
-		assert.NoError(t, err)
-		assert.Equal(t, plainText, string(body))
-		w.WriteHeader(200)
-	}))
-
-	handler.ServeHTTP(rr, req)
-	assert.True(t, called)
-	assert.Equal(t, 200, rr.Code)
-}
-
-func TestCryptoMiddleware_EmptyBody(t *testing.T) {
-	middleware := CryptoMiddleware(nil)
-
-	req := httptest.NewRequest("POST", "/", nil)
-	rr := httptest.NewRecorder()
-
-	called := false
-	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		w.WriteHeader(200)
-	}))
-
-	handler.ServeHTTP(rr, req)
-	assert.True(t, called)
-	assert.Equal(t, 200, rr.Code)
+			if tt.args.status == http.StatusOK {
+				respBody, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				assert.Equal(t, tt.args.expected, string(respBody))
+			}
+		})
+	}
 }

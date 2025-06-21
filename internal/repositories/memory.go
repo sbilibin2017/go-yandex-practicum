@@ -9,27 +9,31 @@ import (
 )
 
 var (
-	muMetricMemory *sync.RWMutex
-	data           map[types.MetricID]types.Metrics
+	// muMemory protects concurrent access to the in-memory data map.
+	muMemory *sync.RWMutex
+
+	// data stores metrics in memory indexed by MetricID.
+	data map[types.MetricID]types.Metrics
 )
 
 func init() {
-	muMetricMemory = new(sync.RWMutex)
+	muMemory = new(sync.RWMutex)
 	data = make(map[types.MetricID]types.Metrics)
 }
 
-type MetricSaveMemoryRepository struct{}
+// MetricMemorySaveRepository provides methods to save metrics in memory.
+type MetricMemorySaveRepository struct{}
 
-func NewMetricSaveMemoryRepository() *MetricSaveMemoryRepository {
-	return &MetricSaveMemoryRepository{}
+// NewMetricMemorySaveRepository creates a new MetricMemorySaveRepository.
+func NewMetricMemorySaveRepository() *MetricMemorySaveRepository {
+	return &MetricMemorySaveRepository{}
 }
 
-func (r *MetricSaveMemoryRepository) Save(
-	ctx context.Context,
-	metric types.Metrics,
-) error {
-	muMetricMemory.Lock()
-	defer muMetricMemory.Unlock()
+// Save stores the given metric in the in-memory map.
+// It acquires a write lock to ensure concurrent safety.
+func (r *MetricMemorySaveRepository) Save(ctx context.Context, metric types.Metrics) error {
+	muMemory.Lock()
+	defer muMemory.Unlock()
 
 	key := types.MetricID{
 		ID:    metric.ID,
@@ -40,17 +44,19 @@ func (r *MetricSaveMemoryRepository) Save(
 	return nil
 }
 
-type MetricGetByIDMemoryRepository struct{}
+// MetricMemoryGetRepository provides methods to get metrics from memory.
+type MetricMemoryGetRepository struct{}
 
-func NewMetricGetByIDMemoryRepository() *MetricGetByIDMemoryRepository {
-	return &MetricGetByIDMemoryRepository{}
+// NewMetricMemoryGetRepository creates a new MetricMemoryGetRepository.
+func NewMetricMemoryGetRepository() *MetricMemoryGetRepository {
+	return &MetricMemoryGetRepository{}
 }
 
-func (r *MetricGetByIDMemoryRepository) Get(
-	ctx context.Context, id types.MetricID,
-) (*types.Metrics, error) {
-	muMetricMemory.RLock()
-	defer muMetricMemory.RUnlock()
+// Get retrieves a metric by its MetricID from the in-memory map.
+// Returns nil if no metric with the given ID exists.
+func (r *MetricMemoryGetRepository) Get(ctx context.Context, id types.MetricID) (*types.Metrics, error) {
+	muMemory.RLock()
+	defer muMemory.RUnlock()
 
 	metric, exists := data[id]
 	if !exists {
@@ -60,22 +66,24 @@ func (r *MetricGetByIDMemoryRepository) Get(
 	return &metric, nil
 }
 
-type MetricListAllMemoryRepository struct{}
+// MetricMemoryListRepository provides methods to list all metrics from memory.
+type MetricMemoryListRepository struct{}
 
-func NewMetricListAllMemoryRepository() *MetricListAllMemoryRepository {
-	return &MetricListAllMemoryRepository{}
+// NewMetricMemoryListRepository creates a new MetricMemoryListRepository.
+func NewMetricMemoryListRepository() *MetricMemoryListRepository {
+	return &MetricMemoryListRepository{}
 }
 
-func (r *MetricListAllMemoryRepository) List(
-	ctx context.Context,
-) ([]*types.Metrics, error) {
-	muMetricMemory.RLock()
-	defer muMetricMemory.RUnlock()
+// List returns all stored metrics as a slice sorted by metric ID.
+// It acquires a read lock during the operation.
+func (r *MetricMemoryListRepository) List(ctx context.Context) ([]*types.Metrics, error) {
+	muMemory.RLock()
+	defer muMemory.RUnlock()
 
-	metrics := make([]*types.Metrics, 0, len(data))
+	var metrics []*types.Metrics
 	for _, m := range data {
-		copy := m
-		metrics = append(metrics, &copy)
+		c := m
+		metrics = append(metrics, &c)
 	}
 
 	sort.SliceStable(metrics, func(i, j int) bool {

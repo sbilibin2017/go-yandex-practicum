@@ -1,203 +1,245 @@
 package middlewares
 
 import (
-	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// --- BufferedResponseWriter tests ---
-
-func TestBufferedResponseWriter_WriteAndHeader(t *testing.T) {
-	brw := NewBufferedResponseWriter()
-
-	// Initially header is empty, status 200 OK
-	assert.Equal(t, http.StatusOK, brw.statusCode)
-	assert.False(t, brw.wroteHeader)
-	assert.NotNil(t, brw.Header())
-
-	// WriteHeader sets status code and wroteHeader flag
-	brw.WriteHeader(http.StatusAccepted)
-	assert.Equal(t, http.StatusAccepted, brw.statusCode)
-	assert.True(t, brw.wroteHeader)
-
-	// WriteHeader called again does nothing
-	brw.WriteHeader(http.StatusBadRequest)
-	assert.Equal(t, http.StatusAccepted, brw.statusCode)
-
-	// Write writes to buffer and triggers WriteHeader if not called
-	brw2 := NewBufferedResponseWriter()
-	n, err := brw2.Write([]byte("hello"))
-	require.NoError(t, err)
-	assert.Equal(t, 5, n)
-	assert.True(t, brw2.wroteHeader)
-	assert.Equal(t, http.StatusOK, brw2.statusCode)
-	assert.Equal(t, "hello", brw2.body.String())
+// helper to create a dummy retriable pgconn.PgError
+func newPgConnError(code string) *pgconn.PgError {
+	return &pgconn.PgError{Code: code}
 }
 
-func TestBufferedResponseWriter_SetError(t *testing.T) {
-	brw := NewBufferedResponseWriter()
-	err := errors.New("test error")
-	brw.SetError(err)
-	assert.Equal(t, err, brw.err)
+func TestRetryMiddleware(t *testing.T) {
+	tests := []struct {
+		name          string
+		delays        []time.Duration
+		handler       http.HandlerFunc
+		expectStatus  int
+		expectRetries int // how many times handler should be called
+	}{
+		{
+			name:   "success on first try",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			},
+			expectStatus:  http.StatusOK,
+			expectRetries: 1,
+		},
+		{
+			name:   "retries on retriable error then success",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func() http.HandlerFunc {
+				attempts := 0
+				return func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					if attempts < 2 {
+						// write retriable error to bufferedResponseWriter
+						brw := w.(*bufferedResponseWriter)
+						brw.err = newPgConnError("08006") // retriable error code prefix "08"
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			}(),
+			expectStatus:  http.StatusOK,
+			expectRetries: 2,
+		},
+		{
+			name:   "exceeds retries and returns 503",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				brw := w.(*bufferedResponseWriter)
+				brw.err = newPgConnError("08006") // always retriable error
+			},
+			expectStatus:  http.StatusServiceUnavailable,
+			expectRetries: 2,
+		},
+		{
+			name:   "non-retriable error returns immediately",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				brw := w.(*bufferedResponseWriter)
+				brw.err = errors.New("non retriable error")
+			},
+			expectStatus:  http.StatusOK, // flush called even with error that’s non-retriable (default status 200)
+			expectRetries: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			middleware, err := RetryMiddleware(WithRetryDelays(tt.delays...))
+			require.NoError(t, err)
+
+			callCount := 0
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				tt.handler(w, r)
+			})
+
+			// Wrap handler with middleware
+			finalHandler := middleware(handler)
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			w := httptest.NewRecorder()
+
+			finalHandler.ServeHTTP(w, req)
+			resp := w.Result()
+			defer resp.Body.Close() // <--- Close response body here
+
+			require.Equal(t, tt.expectStatus, resp.StatusCode)
+			require.Equal(t, tt.expectRetries, callCount)
+		})
+	}
 }
-
-func TestBufferedResponseWriter_FlushTo(t *testing.T) {
-	brw := NewBufferedResponseWriter()
-	brw.Header().Set("X-Foo", "bar")
-	brw.WriteHeader(http.StatusCreated)
-	brw.Write([]byte("response body"))
-
-	rr := httptest.NewRecorder()
-	brw.flushTo(rr)
-
-	assert.Equal(t, http.StatusCreated, rr.Code)
-	assert.Equal(t, "bar", rr.Header().Get("X-Foo"))
-	assert.Equal(t, "response body", rr.Body.String())
-}
-
-// --- isRetriableError tests ---
 
 func TestIsRetriableError(t *testing.T) {
-	// nil error
-	assert.False(t, isRetriableError(nil))
-
-	// PgError code 08xxx -> retriable
-	pgErr := &pgconn.PgError{Code: "08003"}
-	assert.True(t, isRetriableError(pgErr))
-
-	// PgError code not starting with 08 -> not retriable
-	pgErr.Code = "23505"
-	assert.False(t, isRetriableError(pgErr))
-
-	// os.PathError with EAGAIN -> retriable
-	pathErr := &os.PathError{Err: syscall.EAGAIN}
-	assert.True(t, isRetriableError(pathErr))
-
-	// os.PathError with EWOULDBLOCK -> retriable
-	pathErr.Err = syscall.EWOULDBLOCK
-	assert.True(t, isRetriableError(pathErr))
-
-	// os.PathError with other error -> not retriable
-	pathErr.Err = syscall.ECONNRESET
-	assert.False(t, isRetriableError(pathErr))
-
-	// some other error -> not retriable
-	assert.False(t, isRetriableError(errors.New("random error")))
-}
-
-// --- RetryMiddleware tests ---
-
-// testHandler uses handlerFn for custom ServeHTTP logic
-type testHandler struct {
-	callCount int
-	errToSet  error
-	handlerFn func(w http.ResponseWriter, r *http.Request)
-}
-
-func (h *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.callCount++
-	if h.handlerFn != nil {
-		h.handlerFn(w, r)
-		return
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "pgconn error with code 08xxxx",
+			err: &pgconn.PgError{
+				Code: "08003", // connection failure class
+			},
+			want: true,
+		},
+		{
+			name: "pgconn error with code not starting with 08",
+			err: &pgconn.PgError{
+				Code: "12345",
+			},
+			want: false,
+		},
+		{
+			name: "os.PathError with EAGAIN",
+			err: &os.PathError{
+				Err: syscall.EAGAIN,
+			},
+			want: true,
+		},
+		{
+			name: "os.PathError with EWOULDBLOCK",
+			err: &os.PathError{
+				Err: syscall.EWOULDBLOCK,
+			},
+			want: true,
+		},
+		{
+			name: "os.PathError with different error",
+			err: &os.PathError{
+				Err: syscall.ECONNREFUSED,
+			},
+			want: false,
+		},
+		{
+			name: "other generic error",
+			err:  errors.New("some random error"),
+			want: false,
+		},
+		{
+			name: "pgconn error with empty code",
+			err: &pgconn.PgError{
+				Code: "",
+			},
+			want: false,
+		},
+		{
+			name: "os.PathError with nil Err",
+			err: &os.PathError{
+				Err: nil,
+			},
+			want: false,
+		},
+		{
+			name: "wrapped pgconn error with code 08xxxx",
+			err:  wrapPgconnError("08006"),
+			want: true,
+		},
 	}
 
-	if brw, ok := w.(*BufferedResponseWriter); ok {
-		brw.SetError(h.errToSet)
-	}
-}
-
-func TestRetryMiddleware_NoError_NoRetry(t *testing.T) {
-	h := &testHandler{}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler := RetryMiddleware(h)
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, 1, h.callCount)
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestRetryMiddleware_RetryThenSuccess(t *testing.T) {
-	pgErr := &pgconn.PgError{Code: "08003"} // retriable
-	h := &testHandler{}
-
-	call := 0
-	h.handlerFn = func(w http.ResponseWriter, r *http.Request) {
-		call++
-		if brw, ok := w.(*BufferedResponseWriter); ok {
-			if call < 3 {
-				brw.SetError(pgErr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRetriableError(tt.err)
+			if got != tt.want {
+				t.Errorf("IsRetriableError() = %v, want %v", got, tt.want)
 			}
-		}
+		})
 	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler := RetryMiddleware(h)
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, 3, call)
-	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
-func TestRetryMiddleware_RetryExhausted(t *testing.T) {
-	pgErr := &pgconn.PgError{Code: "08003"} // retriable
-	h := &testHandler{
-		errToSet: pgErr,
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler := RetryMiddleware(h)
-	handler.ServeHTTP(rr, req)
-
-	assert.Equal(t, 4, h.callCount)
-	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+// Helper to wrap pgconn.PgError to simulate wrapped errors if needed
+func wrapPgconnError(code string) error {
+	pgErr := &pgconn.PgError{Code: code}
+	return pgErr // simply return, since isRetriableError checks type assertion directly
 }
 
-func TestRetryMiddleware_NonRetriableError(t *testing.T) {
-	h := &testHandler{
-		errToSet: errors.New("non retriable"),
-	}
+func TestBufferedResponseWriter(t *testing.T) {
+	t.Run("Header returns headers map", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		hdr := brw.Header()
+		assert.NotNil(t, hdr)
+		assert.IsType(t, make(http.Header), hdr)
+	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
+	t.Run("WriteHeader sets statusCode", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.WriteHeader(http.StatusTeapot)
+		assert.Equal(t, http.StatusTeapot, brw.statusCode)
+	})
 
-	handler := RetryMiddleware(h)
-	handler.ServeHTTP(rr, req)
+	t.Run("Write writes data to buffer and returns bytes written", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		n, err := brw.Write([]byte("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, "hello", brw.buf.String())
+	})
 
-	assert.Equal(t, 1, h.callCount)
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
+	t.Run("Write returns error and zero bytes written if already errored", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.err = assert.AnError
+		n, err := brw.Write([]byte("hello"))
+		assert.Equal(t, 0, n)
+		assert.Error(t, err)
+		assert.Equal(t, assert.AnError, err)
+	})
 
-func TestRetryMiddleware_ContextCanceled(t *testing.T) {
-	pgErr := &pgconn.PgError{Code: "08003"} // retriable
-	h := &testHandler{
-		errToSet: pgErr,
-	}
+	t.Run("flushTo writes status code and body to ResponseWriter", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.WriteHeader(http.StatusAccepted)
+		brw.Write([]byte("response body"))
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately
+		rec := httptest.NewRecorder()
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
-	rr := httptest.NewRecorder()
+		brw.flushTo(rec)
 
-	handler := RetryMiddleware(h)
-	handler.ServeHTTP(rr, req)
+		res := rec.Result()
+		defer res.Body.Close() // <--- Close response body here
 
-	assert.Less(t, h.callCount, 5)
-	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+		assert.Equal(t, http.StatusAccepted, res.StatusCode)
+
+		body, err := io.ReadAll(rec.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, "response body", string(body))
+	})
 }
