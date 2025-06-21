@@ -22,7 +22,7 @@ mockgen:
 		-package=$(shell basename $(dir $(file)))
 
 test:
-	go test ./internal/... -cover	
+	go test ./... -cover	
 
 migrate:
 	goose -dir ./migrations postgres "postgres://user:password@localhost:5432/db?sslmode=disable" up
