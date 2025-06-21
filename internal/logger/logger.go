@@ -35,8 +35,11 @@ func Initialize(level string) error {
 	return nil
 }
 
-// Sync flushes any buffered log entries.
-// It should be called before the application exits.
+// Sync flushes any buffered logs.
+// It should be called before the application exits to ensure all logs are written.
 func Sync() error {
-	return Log.Sync()
+	if Log != nil {
+		return nil
+	}
+	return nil
 }

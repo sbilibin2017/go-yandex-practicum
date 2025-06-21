@@ -1,10 +1,9 @@
 package repositories
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
-	"io"
 	"os"
 	"sort"
 	"sync"
@@ -13,175 +12,166 @@ import (
 )
 
 var (
-	muMetricFile *sync.RWMutex
+	// muFile protects concurrent access to file operations.
+	muFile *sync.RWMutex
 )
 
 func init() {
-	muMetricFile = new(sync.RWMutex)
+	muFile = new(sync.RWMutex)
 }
 
-type MetricSaveFileRepository struct {
-	pathToFile string
+// FileConfigOption defines a functional option for configuring file repositories.
+type FileConfigOption func(*FileConfig)
+
+// FileConfig holds configuration options for file repositories.
+type FileConfig struct {
+	MetricFilePath string
 }
 
-func NewMetricSaveFileRepository(pathToFile string) *MetricSaveFileRepository {
-	return &MetricSaveFileRepository{
-		pathToFile: pathToFile,
+// NewFileConfig applies functional options and returns a new FileConfig.
+func NewFileConfig(opts ...FileConfigOption) *FileConfig {
+	cfg := &FileConfig{
+		MetricFilePath: "",
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
+}
+
+// WithFilePath sets the file path for the repository.
+func WithFilePath(path string) FileConfigOption {
+	return func(cfg *FileConfig) {
+		cfg.MetricFilePath = path
 	}
 }
 
-func (r *MetricSaveFileRepository) Save(ctx context.Context, metric types.Metrics) error {
-	muMetricFile.Lock()
-	defer muMetricFile.Unlock()
+// MetricFileSaveRepository saves metrics into a JSON file, overwriting it.
+type MetricFileSaveRepository struct {
+	metricFilePath string
+}
 
-	origFile, err := os.Open(r.pathToFile)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if origFile != nil {
-		defer origFile.Close()
-	}
+// NewMetricFileSaveRepository creates a new MetricFileSaveRepository using functional options.
+func NewMetricFileSaveRepository(opts ...FileConfigOption) *MetricFileSaveRepository {
+	cfg := NewFileConfig(opts...)
+	return &MetricFileSaveRepository{metricFilePath: cfg.MetricFilePath}
+}
 
-	tmpFilePath := r.pathToFile + ".tmp"
-	tmpFile, err := os.OpenFile(tmpFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+// Save writes the given metric to the file, overwriting existing content.
+// It acquires a write lock to ensure safe concurrent access.
+func (r *MetricFileSaveRepository) Save(ctx context.Context, metric types.Metrics) error {
+	muFile.Lock()
+	defer muFile.Unlock()
+
+	file, err := os.OpenFile(r.metricFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
-	defer tmpFile.Close()
+	defer file.Close()
 
-	decoder := json.NewDecoder(origFile)
-	encoder := json.NewEncoder(tmpFile)
-
-	found := false
-
-	for {
-		var m types.Metrics
-		err := decoder.Decode(&m)
-		if err != nil {
-			break
-		}
-
-		if m.ID == metric.ID && m.MType == metric.MType {
-			if err := encoder.Encode(metric); err != nil {
-				return err
-			}
-			found = true
-		} else {
-			if err := encoder.Encode(m); err != nil {
-				return err
-			}
-		}
-	}
-
-	if !found {
-		if err := encoder.Encode(metric); err != nil {
-			return err
-		}
-	}
-
-	if err := os.Rename(tmpFilePath, r.pathToFile); err != nil {
-		return err
-	}
-
-	return nil
+	enc := json.NewEncoder(file)
+	return enc.Encode(metric)
 }
 
-type MetricListAllFileRepository struct {
-	pathToFile string
+// MetricFileGetRepository reads metrics from a JSON file.
+type MetricFileGetRepository struct {
+	metricFilePath string
 }
 
-func NewMetricListAllFileRepository(pathToFile string) *MetricListAllFileRepository {
-	return &MetricListAllFileRepository{
-		pathToFile: pathToFile,
-	}
+// NewMetricFileGetRepository creates a new MetricFileGetRepository using functional options.
+func NewMetricFileGetRepository(opts ...FileConfigOption) *MetricFileGetRepository {
+	cfg := NewFileConfig(opts...)
+	return &MetricFileGetRepository{metricFilePath: cfg.MetricFilePath}
 }
 
-func (r *MetricListAllFileRepository) List(
-	ctx context.Context,
-) ([]*types.Metrics, error) {
-	muMetricFile.Lock()
-	defer muMetricFile.Unlock()
+// Get reads the file and attempts to find a metric matching the provided id.
+// It returns (nil, nil) if the file does not exist or the metric is not found.
+// Uses a read lock for safe concurrent access.
+func (r *MetricFileGetRepository) Get(ctx context.Context, id types.MetricID) (*types.Metrics, error) {
+	muFile.RLock()
+	defer muFile.RUnlock()
 
-	file, err := os.Open(r.pathToFile)
+	file, err := os.Open(r.metricFilePath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var metric types.Metrics
+		if err := json.Unmarshal(scanner.Bytes(), &metric); err != nil {
+			return nil, err
+		}
+		key := types.MetricID{ID: metric.ID, MType: metric.MType}
+		if key == id {
+			return &metric, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return nil, nil
+}
+
+// MetricFileListRepository lists all metrics from a JSON file.
+type MetricFileListRepository struct {
+	metricFilePath string
+}
+
+// NewMetricFileListRepository creates a new MetricFileListRepository using functional options.
+func NewMetricFileListRepository(opts ...FileConfigOption) *MetricFileListRepository {
+	cfg := NewFileConfig(opts...)
+	return &MetricFileListRepository{metricFilePath: cfg.MetricFilePath}
+}
+
+// List reads all metrics from the file and returns them sorted by ID.
+// It returns (nil, nil) if the file does not exist.
+// Uses a read lock for safe concurrent access.
+func (r *MetricFileListRepository) List(ctx context.Context) ([]*types.Metrics, error) {
+	muFile.RLock()
+	defer muFile.RUnlock()
+
+	file, err := os.Open(r.metricFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	defer file.Close()
 
 	metricsMap := make(map[types.MetricID]*types.Metrics)
-	decoder := json.NewDecoder(file)
 
-	for {
-		var metric types.Metrics
-		err := decoder.Decode(&metric)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var m types.Metrics
+		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
 			return nil, err
 		}
 
-		key := types.MetricID{
-			ID:    metric.ID,
-			MType: metric.MType,
-		}
-		metricsMap[key] = &metric
+		mCopy := m
+		key := types.MetricID{ID: mCopy.ID, MType: mCopy.MType}
+		metricsMap[key] = &mCopy
 	}
 
-	ids := make([]types.MetricID, 0, len(metricsMap))
-	for id := range metricsMap {
-		ids = append(ids, id)
-	}
-
-	sort.Slice(ids, func(i, j int) bool {
-		return ids[i].ID < ids[j].ID
-	})
-
-	metricsSlice := make([]*types.Metrics, 0, len(ids))
-	for _, id := range ids {
-		metricsSlice = append(metricsSlice, metricsMap[id])
-	}
-
-	return metricsSlice, nil
-}
-
-type MetricGetByIDFileRepository struct {
-	pathToFile string
-}
-
-func NewMetricGetByIDFileRepository(pathToFile string) *MetricGetByIDFileRepository {
-	return &MetricGetByIDFileRepository{
-		pathToFile: pathToFile,
-	}
-}
-
-func (r *MetricGetByIDFileRepository) Get(
-	ctx context.Context, id types.MetricID,
-) (*types.Metrics, error) {
-	muMetricFile.Lock()
-	defer muMetricFile.Unlock()
-
-	file, err := os.Open(r.pathToFile)
-	if err != nil {
+	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
-	decoder := json.NewDecoder(file)
-
-	for {
-		var metric types.Metrics
-		if err := decoder.Decode(&metric); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, err
-		}
-
-		if metric.ID == id.ID && metric.MType == id.MType {
-			return &metric, nil
-		}
+	metricsSlice := make([]*types.Metrics, 0, len(metricsMap))
+	for _, m := range metricsMap {
+		metricsSlice = append(metricsSlice, m)
 	}
 
-	return nil, errors.New("metric not found")
+	sort.SliceStable(metricsSlice, func(i, j int) bool {
+		return metricsSlice[i].ID < metricsSlice[j].ID
+	})
+
+	return metricsSlice, nil
 }
