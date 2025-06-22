@@ -1,4 +1,4 @@
-package apps_test
+package apps
 
 import (
 	"context"
@@ -7,24 +7,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sbilibin2017/go-yandex-practicum/internal/apps"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewAgentAppConfig_Options(t *testing.T) {
-	cfg := apps.NewAgentAppConfig(
-		apps.WithAgentServerAddress("localhost:8080"),
-		apps.WithAgentHeader("X-Test"),
-		apps.WithAgentPollInterval(10),
-		apps.WithAgentReportInterval(20),
-		apps.WithAgentKey("secret"),
-		apps.WithAgentRateLimit(100),
-		apps.WithAgentCryptoKey("/path/to/key"),
-		apps.WithAgentConfigPath("/path/to/config"),
-		apps.WithAgentRestore(true),
-		apps.WithAgentHashHeader("X-Hash"),
-		apps.WithAgentLogLevel("debug"),
-		apps.WithAgentBatchSize(50),
+	cfg := newAgentAppConfig(
+		WithAgentServerAddress("localhost:8080"),
+		WithAgentHeader("X-Test"),
+		WithAgentPollInterval(10),
+		WithAgentReportInterval(20),
+		WithAgentKey("secret"),
+		WithAgentRateLimit(100),
+		WithAgentCryptoKey("/path/to/key"),
+		WithAgentConfigPath("/path/to/config"),
+		WithAgentRestore(true),
+		WithAgentHashHeader("X-Hash"),
+		WithAgentLogLevel("debug"),
+		WithAgentBatchSize(50),
 	)
 
 	assert.Equal(t, "localhost:8080", cfg.ServerAddress)
@@ -46,12 +45,11 @@ func TestAgentApp_Run_GracefulShutdown(t *testing.T) {
 
 	worker := func(ctx context.Context) error {
 		workerCalled = true
-		// Simulate work until context is done
 		<-ctx.Done()
 		return ctx.Err()
 	}
 
-	app := &apps.AgentApp{
+	app := &AgentApp{
 		Workers: []func(ctx context.Context) error{worker},
 	}
 
@@ -71,7 +69,7 @@ func TestAgentApp_Run_WorkerReturnsError(t *testing.T) {
 		return expectedErr
 	}
 
-	app := &apps.AgentApp{
+	app := &AgentApp{
 		Workers: []func(ctx context.Context) error{worker},
 	}
 
@@ -96,7 +94,7 @@ func TestAgentApp_Run_MultipleWorkers(t *testing.T) {
 		return ctx.Err()
 	}
 
-	app := &apps.AgentApp{
+	app := &AgentApp{
 		Workers: []func(ctx context.Context) error{worker1, worker2},
 	}
 
@@ -136,16 +134,16 @@ func TestNewAgentApp_Success(t *testing.T) {
 	pemPath := createTempPEMFile(t)
 	defer os.Remove(pemPath)
 
-	app, err := apps.NewAgentApp(
-		apps.WithAgentServerAddress("localhost:8080"),
-		apps.WithAgentHeader("X-Test-Header"),
-		apps.WithAgentKey("testkey"),
-		apps.WithAgentPollInterval(5),
-		apps.WithAgentReportInterval(10),
-		apps.WithAgentBatchSize(100),
-		apps.WithAgentRateLimit(10),
-		apps.WithAgentCryptoKey(pemPath),
-		apps.WithAgentLogLevel("debug"),
+	app, err := NewAgentApp(
+		WithAgentServerAddress("localhost:8080"),
+		WithAgentHeader("X-Test-Header"),
+		WithAgentKey("testkey"),
+		WithAgentPollInterval(5),
+		WithAgentReportInterval(10),
+		WithAgentBatchSize(100),
+		WithAgentRateLimit(10),
+		WithAgentCryptoKey(pemPath),
+		WithAgentLogLevel("debug"),
 	)
 
 	if err != nil {
@@ -154,4 +152,29 @@ func TestNewAgentApp_Success(t *testing.T) {
 	if app == nil {
 		t.Fatal("expected non-nil app")
 	}
+}
+
+// Add this option helper to your apps package (optional)
+func WithAgentIsGRPC(isGRPC bool) AgentAppOpt {
+	return func(c *agentAppConfig) {
+		c.IsGRPC = isGRPC
+	}
+}
+
+func TestNewAgentApp_GrpcFacade(t *testing.T) {
+	app, err := NewAgentApp(
+		WithAgentServerAddress("localhost:9090"),
+		WithAgentIsGRPC(true),
+		WithAgentLogLevel("debug"),
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if app == nil {
+		t.Fatal("expected non-nil app")
+	}
+
+	assert.NotNil(t, app.MetricContextFacade, "MetricContextFacade should be initialized")
+
 }

@@ -48,8 +48,8 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/counter/myCounter",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "myCounter", MType: types.Counter}).
-					Return(&types.Metrics{ID: "myCounter", MType: types.Counter, Delta: ptrInt64(42)}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "myCounter", Type: types.Counter}).
+					Return(&types.Metrics{ID: "myCounter", Type: types.Counter, Delta: ptrInt64(42)}, nil)
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: "42",
@@ -60,8 +60,8 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/gauge/myGauge",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "myGauge", MType: types.Gauge}).
-					Return(&types.Metrics{ID: "myGauge", MType: types.Gauge, Value: ptrFloat64(3.14)}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "myGauge", Type: types.Gauge}).
+					Return(&types.Metrics{ID: "myGauge", Type: types.Gauge, Value: ptrFloat64(3.14)}, nil)
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: "3.14",
@@ -86,7 +86,7 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/counter/missingMetric",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "missingMetric", MType: types.Counter}).
+					Get(gomock.Any(), types.MetricID{ID: "missingMetric", Type: types.Counter}).
 					Return(nil, nil)
 			},
 			expectedCode: http.StatusNotFound,
@@ -97,7 +97,7 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/gauge/errorMetric",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "errorMetric", MType: types.Gauge}).
+					Get(gomock.Any(), types.MetricID{ID: "errorMetric", Type: types.Gauge}).
 					Return(nil, context.DeadlineExceeded)
 			},
 			expectedCode: http.StatusInternalServerError,
@@ -108,8 +108,8 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/counter/nilDelta",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "nilDelta", MType: types.Counter}).
-					Return(&types.Metrics{ID: "nilDelta", MType: types.Counter, Delta: nil}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "nilDelta", Type: types.Counter}).
+					Return(&types.Metrics{ID: "nilDelta", Type: types.Counter, Delta: nil}, nil)
 			},
 			expectedCode: http.StatusNotFound,
 		},
@@ -119,8 +119,8 @@ func TestMetricGetPathHandler(t *testing.T) {
 			url:    "/value/gauge/nilValue",
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "nilValue", MType: types.Gauge}).
-					Return(&types.Metrics{ID: "nilValue", MType: types.Gauge, Value: nil}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "nilValue", Type: types.Gauge}).
+					Return(&types.Metrics{ID: "nilValue", Type: types.Gauge, Value: nil}, nil)
 			},
 			expectedCode: http.StatusNotFound,
 		},
@@ -172,8 +172,8 @@ func TestMetricGetBodyHandler(t *testing.T) {
 			requestBody: `{"id":"myCounter","type":"counter"}`,
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "myCounter", MType: types.Counter}).
-					Return(&types.Metrics{ID: "myCounter", MType: types.Counter, Delta: ptrInt64(123)}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "myCounter", Type: types.Counter}).
+					Return(&types.Metrics{ID: "myCounter", Type: types.Counter, Delta: ptrInt64(123)}, nil)
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: `{"id":"myCounter","type":"counter","delta":123}`,
@@ -185,8 +185,8 @@ func TestMetricGetBodyHandler(t *testing.T) {
 			requestBody: `{"id":"myGauge","type":"gauge"}`,
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "myGauge", MType: types.Gauge}).
-					Return(&types.Metrics{ID: "myGauge", MType: types.Gauge, Value: ptrFloat64(9.87)}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "myGauge", Type: types.Gauge}).
+					Return(&types.Metrics{ID: "myGauge", Type: types.Gauge, Value: ptrFloat64(9.87)}, nil)
 			},
 			expectedCode: http.StatusOK,
 			expectedBody: `{"id":"myGauge","type":"gauge","value":9.87}`,
@@ -222,7 +222,7 @@ func TestMetricGetBodyHandler(t *testing.T) {
 			requestBody: `{"id":"errorMetric","type":"gauge"}`,
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "errorMetric", MType: types.Gauge}).
+					Get(gomock.Any(), types.MetricID{ID: "errorMetric", Type: types.Gauge}).
 					Return(nil, context.DeadlineExceeded)
 			},
 			expectedCode: http.StatusInternalServerError,
@@ -234,7 +234,7 @@ func TestMetricGetBodyHandler(t *testing.T) {
 			requestBody: `{"id":"missingMetric","type":"counter"}`,
 			mockExpect: func() {
 				mockGetter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "missingMetric", MType: types.Counter}).
+					Get(gomock.Any(), types.MetricID{ID: "missingMetric", Type: types.Counter}).
 					Return(nil, nil)
 			},
 			expectedCode: http.StatusNotFound,

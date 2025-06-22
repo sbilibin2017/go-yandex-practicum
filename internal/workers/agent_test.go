@@ -132,7 +132,7 @@ LOOP:
 	assert.GreaterOrEqual(t, len(collected), 5)
 	for _, metric := range collected {
 		assert.NotEmpty(t, metric.ID)
-		assert.True(t, metric.MType == types.Gauge || metric.MType == types.Counter)
+		assert.True(t, metric.Type == types.Gauge || metric.Type == types.Counter)
 		assert.True(t, (metric.Value != nil) || (metric.Delta != nil))
 	}
 
@@ -153,11 +153,11 @@ func TestStartMetricsReporting(t *testing.T) {
 	defer cancel()
 
 	metrics := []*types.Metrics{
-		{ID: "m1", MType: types.Gauge, Value: float64Ptr(1)},
-		{ID: "m2", MType: types.Gauge, Value: float64Ptr(2)},
-		{ID: "m3", MType: types.Gauge, Value: float64Ptr(3)},
-		{ID: "m4", MType: types.Gauge, Value: float64Ptr(4)},
-		{ID: "m5", MType: types.Gauge, Value: float64Ptr(5)},
+		{ID: "m1", Type: types.Gauge, Value: float64Ptr(1)},
+		{ID: "m2", Type: types.Gauge, Value: float64Ptr(2)},
+		{ID: "m3", Type: types.Gauge, Value: float64Ptr(3)},
+		{ID: "m4", Type: types.Gauge, Value: float64Ptr(4)},
+		{ID: "m5", Type: types.Gauge, Value: float64Ptr(5)},
 	}
 
 	inCh := make(chan *types.Metrics, len(metrics))

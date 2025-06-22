@@ -39,7 +39,7 @@ func TestMetricMemorySaveRepository_Save(t *testing.T) {
 			"Save gauge metric",
 			types.Metrics{
 				ID:    "id1",
-				MType: types.Gauge,
+				Type:  types.Gauge,
 				Value: float64Ptr(1.1),
 				Delta: nil,
 			},
@@ -48,7 +48,7 @@ func TestMetricMemorySaveRepository_Save(t *testing.T) {
 			"Save counter metric",
 			types.Metrics{
 				ID:    "id2",
-				MType: types.Counter,
+				Type:  types.Counter,
 				Value: nil,
 				Delta: int64Ptr(10),
 			},
@@ -61,7 +61,7 @@ func TestMetricMemorySaveRepository_Save(t *testing.T) {
 			assert.NoError(t, err)
 
 			muMemory.RLock()
-			storedMetric, ok := data[types.MetricID{ID: tt.metric.ID, MType: tt.metric.MType}]
+			storedMetric, ok := data[types.MetricID{ID: tt.metric.ID, Type: tt.metric.Type}]
 			muMemory.RUnlock()
 
 			assert.True(t, ok)
@@ -79,13 +79,13 @@ func TestMetricMemoryGetRepository_Get(t *testing.T) {
 	preMetrics := []types.Metrics{
 		{
 			ID:    "id1",
-			MType: types.Gauge,
+			Type:  types.Gauge,
 			Value: float64Ptr(1.1),
 			Delta: nil,
 		},
 		{
 			ID:    "id2",
-			MType: types.Counter,
+			Type:  types.Counter,
 			Value: nil,
 			Delta: int64Ptr(20),
 		},
@@ -102,17 +102,17 @@ func TestMetricMemoryGetRepository_Get(t *testing.T) {
 	}{
 		{
 			"Get existing gauge",
-			types.MetricID{ID: "id1", MType: types.Gauge},
+			types.MetricID{ID: "id1", Type: types.Gauge},
 			&preMetrics[0],
 		},
 		{
 			"Get existing counter",
-			types.MetricID{ID: "id2", MType: types.Counter},
+			types.MetricID{ID: "id2", Type: types.Counter},
 			&preMetrics[1],
 		},
 		{
 			"Get non-existent metric",
-			types.MetricID{ID: "id3", MType: types.Gauge},
+			types.MetricID{ID: "id3", Type: types.Gauge},
 			nil,
 		},
 	}
@@ -135,19 +135,19 @@ func TestMetricMemoryListRepository_List(t *testing.T) {
 	metrics := []types.Metrics{
 		{
 			ID:    "b",
-			MType: types.Gauge,
+			Type:  types.Gauge,
 			Value: float64Ptr(3.3),
 			Delta: nil,
 		},
 		{
 			ID:    "a",
-			MType: types.Counter,
+			Type:  types.Counter,
 			Value: nil,
 			Delta: int64Ptr(15),
 		},
 		{
 			ID:    "c",
-			MType: types.Gauge,
+			Type:  types.Gauge,
 			Value: float64Ptr(7.7),
 			Delta: nil,
 		},

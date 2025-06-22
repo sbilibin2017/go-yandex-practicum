@@ -95,7 +95,7 @@ func (r *MetricFileGetRepository) Get(ctx context.Context, id types.MetricID) (*
 			return nil, err
 		}
 
-		if metric.ID == id.ID && metric.MType == id.MType {
+		if metric.ID == id.ID && metric.Type == id.Type {
 			return &metric, nil
 		}
 	}
@@ -152,7 +152,7 @@ func (r *MetricFileListRepository) List(ctx context.Context) ([]*types.Metrics, 
 		if err := json.Unmarshal(scanner.Bytes(), &m); err != nil {
 			return nil, err
 		}
-		key := types.MetricID{ID: m.ID, MType: m.MType}
+		key := types.MetricID{ID: m.ID, Type: m.Type}
 		mCopy := m
 		metricsMap[key] = &mCopy
 	}

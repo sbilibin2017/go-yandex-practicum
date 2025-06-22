@@ -91,7 +91,7 @@ func TestMetricDBSaveRepository_Save(t *testing.T) {
 
 	metric := types.Metrics{
 		ID:    "test-metric-id",
-		MType: "gauge",
+		Type:  "gauge",
 		Delta: int64Ptr(100),
 		Value: float64Ptr(123.45),
 	}
@@ -100,10 +100,10 @@ func TestMetricDBSaveRepository_Save(t *testing.T) {
 	require.NoError(t, err)
 
 	var got types.Metrics
-	err = db.GetContext(ctx, &got, `SELECT id, type, delta, value FROM content.metrics WHERE id = $1 AND type = $2`, metric.ID, metric.MType)
+	err = db.GetContext(ctx, &got, `SELECT id, type, delta, value FROM content.metrics WHERE id = $1 AND type = $2`, metric.ID, metric.Type)
 	require.NoError(t, err)
 	require.Equal(t, metric.ID, got.ID)
-	require.Equal(t, metric.MType, got.MType)
+	require.Equal(t, metric.Type, got.Type)
 	require.Equal(t, metric.Delta, got.Delta)
 	require.Equal(t, metric.Value, got.Value)
 
@@ -113,7 +113,7 @@ func TestMetricDBSaveRepository_Save(t *testing.T) {
 	err = repo.Save(ctx, metric)
 	require.NoError(t, err)
 
-	err = db.GetContext(ctx, &got, `SELECT id, type, delta, value FROM content.metrics WHERE id = $1 AND type = $2`, metric.ID, metric.MType)
+	err = db.GetContext(ctx, &got, `SELECT id, type, delta, value FROM content.metrics WHERE id = $1 AND type = $2`, metric.ID, metric.Type)
 	require.NoError(t, err)
 	require.Equal(t, metric.Delta, got.Delta)
 	require.Equal(t, metric.Value, got.Value)
@@ -130,13 +130,13 @@ func TestMetricDBGetRepository_Get(t *testing.T) {
 
 	testMetric := types.Metrics{
 		ID:    "get-metric-id",
-		MType: "counter",
+		Type:  "counter",
 		Delta: int64Ptr(42),
 		Value: float64Ptr(99.9),
 	}
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO content.metrics (id, type, delta, value) VALUES ($1, $2, $3, $4)`,
-		testMetric.ID, testMetric.MType, testMetric.Delta, testMetric.Value)
+		testMetric.ID, testMetric.Type, testMetric.Delta, testMetric.Value)
 	require.NoError(t, err)
 
 	repo := NewMetricDBGetRepository(
@@ -146,15 +146,15 @@ func TestMetricDBGetRepository_Get(t *testing.T) {
 		}),
 	)
 
-	got, err := repo.Get(ctx, types.MetricID{ID: testMetric.ID, MType: testMetric.MType})
+	got, err := repo.Get(ctx, types.MetricID{ID: testMetric.ID, Type: testMetric.Type})
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, testMetric.ID, got.ID)
-	require.Equal(t, testMetric.MType, got.MType)
+	require.Equal(t, testMetric.Type, got.Type)
 	require.Equal(t, testMetric.Delta, got.Delta)
 	require.Equal(t, testMetric.Value, got.Value)
 
-	got, err = repo.Get(ctx, types.MetricID{ID: "non-existent-id", MType: "gauge"})
+	got, err = repo.Get(ctx, types.MetricID{ID: "non-existent-id", Type: "gauge"})
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
@@ -169,15 +169,15 @@ func TestMetricDBListRepository_List(t *testing.T) {
 	defer cleanup()
 
 	metricsToInsert := []types.Metrics{
-		{ID: "metric1", MType: "gauge", Delta: int64Ptr(10), Value: float64Ptr(1.1)},
-		{ID: "metric2", MType: "counter", Delta: int64Ptr(20), Value: float64Ptr(2.2)},
-		{ID: "metric3", MType: "gauge", Delta: int64Ptr(30), Value: float64Ptr(3.3)},
+		{ID: "metric1", Type: "gauge", Delta: int64Ptr(10), Value: float64Ptr(1.1)},
+		{ID: "metric2", Type: "counter", Delta: int64Ptr(20), Value: float64Ptr(2.2)},
+		{ID: "metric3", Type: "gauge", Delta: int64Ptr(30), Value: float64Ptr(3.3)},
 	}
 
 	for _, m := range metricsToInsert {
 		_, err := db.ExecContext(ctx,
 			`INSERT INTO content.metrics (id, type, delta, value) VALUES ($1, $2, $3, $4)`,
-			m.ID, m.MType, m.Delta, m.Value)
+			m.ID, m.Type, m.Delta, m.Value)
 		require.NoError(t, err)
 	}
 
@@ -195,7 +195,7 @@ func TestMetricDBListRepository_List(t *testing.T) {
 	// Verify contents match (order by ID)
 	for i, m := range metricsToInsert {
 		require.Equal(t, m.ID, got[i].ID)
-		require.Equal(t, m.MType, got[i].MType)
+		require.Equal(t, m.Type, got[i].Type)
 		require.Equal(t, m.Delta, got[i].Delta)
 		require.Equal(t, m.Value, got[i].Value)
 	}

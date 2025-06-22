@@ -153,41 +153,41 @@ func startMetricsPolling(ctx context.Context, pollInterval int) <-chan *types.Me
 		v28 := rand.Float64()
 
 		return []*types.Metrics{
-			{ID: "Alloc", MType: types.Gauge, Value: &v1},
-			{ID: "BuckHashSys", MType: types.Gauge, Value: &v2},
-			{ID: "Frees", MType: types.Gauge, Value: &v3},
-			{ID: "GCCPUFraction", MType: types.Gauge, Value: &v4},
-			{ID: "GCSys", MType: types.Gauge, Value: &v5},
-			{ID: "HeapAlloc", MType: types.Gauge, Value: &v6},
-			{ID: "HeapIdle", MType: types.Gauge, Value: &v7},
-			{ID: "HeapInuse", MType: types.Gauge, Value: &v8},
-			{ID: "HeapObjects", MType: types.Gauge, Value: &v9},
-			{ID: "HeapReleased", MType: types.Gauge, Value: &v10},
-			{ID: "HeapSys", MType: types.Gauge, Value: &v11},
-			{ID: "LastGC", MType: types.Gauge, Value: &v12},
-			{ID: "Lookups", MType: types.Gauge, Value: &v13},
-			{ID: "MCacheInuse", MType: types.Gauge, Value: &v14},
-			{ID: "MCacheSys", MType: types.Gauge, Value: &v15},
-			{ID: "MSpanInuse", MType: types.Gauge, Value: &v16},
-			{ID: "MSpanSys", MType: types.Gauge, Value: &v17},
-			{ID: "Mallocs", MType: types.Gauge, Value: &v18},
-			{ID: "NextGC", MType: types.Gauge, Value: &v19},
-			{ID: "NumForcedGC", MType: types.Gauge, Value: &v20},
-			{ID: "NumGC", MType: types.Gauge, Value: &v21},
-			{ID: "OtherSys", MType: types.Gauge, Value: &v22},
-			{ID: "PauseTotalNs", MType: types.Gauge, Value: &v23},
-			{ID: "StackInuse", MType: types.Gauge, Value: &v24},
-			{ID: "StackSys", MType: types.Gauge, Value: &v25},
-			{ID: "Sys", MType: types.Gauge, Value: &v26},
-			{ID: "TotalAlloc", MType: types.Gauge, Value: &v27},
-			{ID: "RandomValue", MType: types.Gauge, Value: &v28},
+			{ID: "Alloc", Type: types.Gauge, Value: &v1},
+			{ID: "BuckHashSys", Type: types.Gauge, Value: &v2},
+			{ID: "Frees", Type: types.Gauge, Value: &v3},
+			{ID: "GCCPUFraction", Type: types.Gauge, Value: &v4},
+			{ID: "GCSys", Type: types.Gauge, Value: &v5},
+			{ID: "HeapAlloc", Type: types.Gauge, Value: &v6},
+			{ID: "HeapIdle", Type: types.Gauge, Value: &v7},
+			{ID: "HeapInuse", Type: types.Gauge, Value: &v8},
+			{ID: "HeapObjects", Type: types.Gauge, Value: &v9},
+			{ID: "HeapReleased", Type: types.Gauge, Value: &v10},
+			{ID: "HeapSys", Type: types.Gauge, Value: &v11},
+			{ID: "LastGC", Type: types.Gauge, Value: &v12},
+			{ID: "Lookups", Type: types.Gauge, Value: &v13},
+			{ID: "MCacheInuse", Type: types.Gauge, Value: &v14},
+			{ID: "MCacheSys", Type: types.Gauge, Value: &v15},
+			{ID: "MSpanInuse", Type: types.Gauge, Value: &v16},
+			{ID: "MSpanSys", Type: types.Gauge, Value: &v17},
+			{ID: "Mallocs", Type: types.Gauge, Value: &v18},
+			{ID: "NextGC", Type: types.Gauge, Value: &v19},
+			{ID: "NumForcedGC", Type: types.Gauge, Value: &v20},
+			{ID: "NumGC", Type: types.Gauge, Value: &v21},
+			{ID: "OtherSys", Type: types.Gauge, Value: &v22},
+			{ID: "PauseTotalNs", Type: types.Gauge, Value: &v23},
+			{ID: "StackInuse", Type: types.Gauge, Value: &v24},
+			{ID: "StackSys", Type: types.Gauge, Value: &v25},
+			{ID: "Sys", Type: types.Gauge, Value: &v26},
+			{ID: "TotalAlloc", Type: types.Gauge, Value: &v27},
+			{ID: "RandomValue", Type: types.Gauge, Value: &v28},
 		}
 	}
 
 	getRuntimeCounterMetrics := func() []*types.Metrics {
 		pollCount := int64(1)
 		return []*types.Metrics{
-			{ID: "PollCount", MType: types.Counter, Delta: &pollCount},
+			{ID: "PollCount", Type: types.Counter, Delta: &pollCount},
 		}
 	}
 
@@ -198,15 +198,15 @@ func startMetricsPolling(ctx context.Context, pollInterval int) <-chan *types.Me
 			total := float64(vmStat.Total)
 			free := float64(vmStat.Free)
 
-			result = append(result, &types.Metrics{ID: "TotalMemory", MType: types.Gauge, Value: &total})
-			result = append(result, &types.Metrics{ID: "FreeMemory", MType: types.Gauge, Value: &free})
+			result = append(result, &types.Metrics{ID: "TotalMemory", Type: types.Gauge, Value: &total})
+			result = append(result, &types.Metrics{ID: "FreeMemory", Type: types.Gauge, Value: &free})
 		}
 
 		if cpuPercents, err := cpu.PercentWithContext(ctx, 0, true); err == nil {
 			for i, percent := range cpuPercents {
 				p := percent
 				id := "CPUutilization" + strconv.Itoa(i)
-				result = append(result, &types.Metrics{ID: id, MType: types.Gauge, Value: &p})
+				result = append(result, &types.Metrics{ID: id, Type: types.Gauge, Value: &p})
 			}
 		}
 

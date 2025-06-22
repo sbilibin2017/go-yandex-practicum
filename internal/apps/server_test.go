@@ -9,7 +9,6 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -18,70 +17,56 @@ import (
 
 func TestNewServerAppConfig_Options(t *testing.T) {
 	// Base config with no options set
-	cfg := NewServerAppConfig()
+	cfg := newServerAppConfig()
 	assert.NotNil(t, cfg)
 
-	// Test WithServerAddress
-	cfg = NewServerAppConfig(WithServerAddress("localhost:8080"))
+	cfg = newServerAppConfig(WithServerAddress("localhost:8080"))
 	assert.Equal(t, "localhost:8080", cfg.ServerAddress)
 
-	// Test WithServerDatabaseDSN
-	cfg = NewServerAppConfig(WithServerDatabaseDSN("postgres://user:pass@localhost/db"))
+	cfg = newServerAppConfig(WithServerDatabaseDSN("postgres://user:pass@localhost/db"))
 	assert.Equal(t, "postgres://user:pass@localhost/db", cfg.DatabaseDSN)
 
-	// Test WithServerStoreInterval
-	cfg = NewServerAppConfig(WithServerStoreInterval(15))
+	cfg = newServerAppConfig(WithServerStoreInterval(15))
 	assert.Equal(t, 15, cfg.StoreInterval)
 
-	// Test WithServerFileStoragePath
-	cfg = NewServerAppConfig(WithServerFileStoragePath("/tmp/storage"))
+	cfg = newServerAppConfig(WithServerFileStoragePath("/tmp/storage"))
 	assert.Equal(t, "/tmp/storage", cfg.FileStoragePath)
 
-	// Test WithServerRestore
-	cfg = NewServerAppConfig(WithServerRestore(true))
+	cfg = newServerAppConfig(WithServerRestore(true))
 	assert.True(t, cfg.Restore)
 
-	// Test WithServerKey
-	cfg = NewServerAppConfig(WithServerKey("mykey"))
+	cfg = newServerAppConfig(WithServerKey("mykey"))
 	assert.Equal(t, "mykey", cfg.Key)
 
-	// Test WithServerCryptoKey
-	cfg = NewServerAppConfig(WithServerCryptoKey("cryptokey"))
+	cfg = newServerAppConfig(WithServerCryptoKey("cryptokey"))
 	assert.Equal(t, "cryptokey", cfg.CryptoKey)
 
-	// Test WithServerConfigPath
-	cfg = NewServerAppConfig(WithServerConfigPath("/etc/config.yaml"))
+	cfg = newServerAppConfig(WithServerConfigPath("/etc/config.yaml"))
 	assert.Equal(t, "/etc/config.yaml", cfg.ConfigPath)
 
-	// Test WithServerTrustedSubnet
-	cfg = NewServerAppConfig(WithServerTrustedSubnet("192.168.1.0/24"))
+	cfg = newServerAppConfig(WithServerTrustedSubnet("192.168.1.0/24"))
 	assert.Equal(t, "192.168.1.0/24", cfg.TrustedSubnet)
 
-	// Test WithServerHashHeader
-	cfg = NewServerAppConfig(WithServerHashHeader("X-Hash"))
+	cfg = newServerAppConfig(WithServerHashHeader("X-Hash"))
 	assert.Equal(t, "X-Hash", cfg.HashHeader)
 
-	// Test WithServerLogLevel
-	cfg = NewServerAppConfig(WithServerLogLevel("debug"))
+	cfg = newServerAppConfig(WithServerLogLevel("debug"))
 	assert.Equal(t, "debug", cfg.LogLevel)
 
-	// Test WithServerMigrationsDir
-	cfg = NewServerAppConfig(WithServerMigrationsDir("/migrations"))
+	cfg = newServerAppConfig(WithServerMigrationsDir("/migrations"))
 	assert.Equal(t, "/migrations", cfg.MigrationsDir)
 }
 
 func TestNewServerApp(t *testing.T) {
-	// Test with minimal options (no DB, no file storage)
-	_, err := NewServerApp(
+	app, err := NewServerApp(
 		WithServerAddress(":0"),
 		WithServerRestore(false),
 	)
-	assert.NoError(t, err)
-
+	require.NoError(t, err)
+	require.NotNil(t, app)
 }
 
 func TestNewServerApp_FileStoragePath(t *testing.T) {
-	// Use a temporary directory and file path
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "metrics.json")
 
@@ -90,17 +75,13 @@ func TestNewServerApp_FileStoragePath(t *testing.T) {
 		WithServerFileStoragePath(filePath),
 		WithServerRestore(false),
 	)
-
-	// Assert no error
-	assert.NoError(t, err)
-	assert.NotNil(t, app)
-
+	require.NoError(t, err)
+	require.NotNil(t, app)
 }
 
 func TestNewServerApp_WithDatabaseDSN_AndMigrations(t *testing.T) {
 	ctx := context.Background()
 
-	// Start PostgreSQL container
 	req := testcontainers.ContainerRequest{
 		Image:        "postgres:15-alpine",
 		ExposedPorts: []string{"5432/tcp"},
@@ -116,23 +97,22 @@ func TestNewServerApp_WithDatabaseDSN_AndMigrations(t *testing.T) {
 		ContainerRequest: req,
 		Started:          true,
 	})
-	assert.NoError(t, err)
-	defer pgContainer.Terminate(ctx)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, pgContainer.Terminate(ctx))
+	}()
 
-	// Get container's host and port
 	host, err := pgContainer.Host(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	port, err := pgContainer.MappedPort(ctx, "5432")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	// Build DSN
 	dsn := fmt.Sprintf("postgres://testuser:testpass@%s:%s/testdb?sslmode=disable", host, port.Port())
 
-	// Create temp directory for migrations
 	tmpDir := t.TempDir()
 
-	// Create a simple migration file - 0001_create_table.sql
+	// Write a valid migration file for goose with Up and Down
 	migrationFile := filepath.Join(tmpDir, "0001_create_table.sql")
 	err = os.WriteFile(migrationFile, []byte(`
 -- +goose Up
@@ -144,63 +124,89 @@ CREATE TABLE IF NOT EXISTS test_table (
 -- +goose Down
 DROP TABLE IF EXISTS test_table;
 `), 0644)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	// Run NewServerApp with migrations dir set
 	app, err := NewServerApp(
 		WithServerAddress(":0"),
 		WithServerDatabaseDSN(dsn),
 		WithServerRestore(false),
 		WithServerMigrationsDir(tmpDir),
 	)
-	assert.NoError(t, err)
-	assert.NotNil(t, app)
+	require.NoError(t, err)
+	require.NotNil(t, app)
+	require.NotNil(t, app.Container)
+	require.NotNil(t, app.Container.DB)
 
-	// Verify DB connected and migration applied by checking if table exists
 	var tableName string
-	err = app.DB.Get(&tableName, "SELECT to_regclass('public.test_table')")
-	assert.NoError(t, err)
+	err = app.Container.DB.Get(&tableName, "SELECT to_regclass('public.test_table')")
+	require.NoError(t, err)
 	assert.Equal(t, "test_table", tableName)
 }
 
 func TestServerApp_Run_WithMemoryStorage(t *testing.T) {
-	// Create app with in-memory storage (no DB DSN, no FileStoragePath)
 	app, err := NewServerApp(
 		WithServerStoreInterval(1),
 		WithServerRestore(false),
-		WithServerAddress(":0"), // use ephemeral port
+		WithServerAddress(":0"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, app)
+	require.NotNil(t, app.Container)
 
-	// Make sure memory repositories are set
-	require.NotNil(t, app.MetricMemorySaveRepository)
-	require.NotNil(t, app.MetricMemoryGetRepository)
-	require.NotNil(t, app.MetricMemoryListRepository)
+	require.NotNil(t, app.Container.MetricMemorySaveRepository)
+	require.NotNil(t, app.Container.MetricMemoryGetRepository)
+	require.NotNil(t, app.Container.MetricMemoryListRepository)
 
-	// Add worker for memory storage (simulate what NewServerApp should do)
-	app.Workers = append(app.Workers, func(ctx context.Context) error {
-		// Just wait until context is done
+	// Append dummy worker that exits on context cancellation
+	app.Container.Workers = append(app.Container.Workers, func(ctx context.Context) error {
 		<-ctx.Done()
 		return nil
 	})
 
-	// Run the server in a separate goroutine, cancel immediately to trigger shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	// Run app.Run in a separate goroutine
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	doneCh := make(chan error)
+	errCh := make(chan error)
 	go func() {
-		doneCh <- app.Run(ctx)
+		errCh <- app.Run(ctx)
 	}()
 
-	// Cancel immediately, triggering shutdown
-	cancel()
-
 	select {
-	case err := <-doneCh:
+	case err := <-errCh:
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("Server did not shutdown in time")
+		t.Fatal("Timeout waiting for app.Run to finish")
+	}
+}
+
+func TestNewServerGRPCApp_Success(t *testing.T) {
+	app, err := NewServerGRPCApp(
+		WithServerLogLevel("info"),
+		WithServerAddress("127.0.0.1:0"),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, app)
+	require.NotNil(t, app.Container)
+
+	// Append dummy worker to avoid zero workers edge case
+	app.Container.Workers = append(app.Container.Workers, func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	errCh := make(chan error)
+	go func() {
+		errCh <- app.Run(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Timeout waiting for app.Run to finish")
 	}
 }

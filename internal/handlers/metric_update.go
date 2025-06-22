@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	pb "github.com/sbilibin2017/go-yandex-practicum/protos"
 )
 
 // MetricUpdater defines an interface for updating multiple metrics.
@@ -37,10 +38,10 @@ func NewMetricUpdatePathHandler(opts ...MetricUpdatePathHandlerOption) *MetricUp
 	return h
 }
 
-func (h *MetricUpdatePathHandler) serveHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *MetricUpdatePathHandler) Update(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
-	mType := chi.URLParam(r, "type")
+	Type := chi.URLParam(r, "type")
 	name := chi.URLParam(r, "name")
 	value := chi.URLParam(r, "value")
 
@@ -56,7 +57,7 @@ func (h *MetricUpdatePathHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 	var metric types.Metrics
 	metric.ID = name
 
-	switch mType {
+	switch Type {
 	case types.Counter:
 		delta, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
@@ -64,7 +65,7 @@ func (h *MetricUpdatePathHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		metric.Delta = &delta
-		metric.MType = types.Counter
+		metric.Type = types.Counter
 
 	case types.Gauge:
 		val, err := strconv.ParseFloat(value, 64)
@@ -73,7 +74,7 @@ func (h *MetricUpdatePathHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		metric.Value = &val
-		metric.MType = types.Gauge
+		metric.Type = types.Gauge
 
 	default:
 		w.WriteHeader(http.StatusBadRequest)
@@ -89,8 +90,8 @@ func (h *MetricUpdatePathHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *MetricUpdatePathHandler) RegisterRoute(r chi.Router) {
-	r.Post("/update/{type}/{name}/{value}", h.serveHTTP)
-	r.Post("/update/{type}/{name}", h.serveHTTP)
+	r.Post("/update/{type}/{name}/{value}", h.Update)
+	r.Post("/update/{type}/{name}", h.Update)
 }
 
 // Functional options for MetricUpdateBodyHandler
@@ -115,7 +116,7 @@ func NewMetricUpdateBodyHandler(opts ...MetricUpdateBodyHandlerOption) *MetricUp
 	return h
 }
 
-func (h *MetricUpdateBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *MetricUpdateBodyHandler) Update(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var metric types.Metrics
@@ -130,7 +131,7 @@ func (h *MetricUpdateBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	switch metric.MType {
+	switch metric.Type {
 	case types.Counter:
 		if metric.Delta == nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -159,7 +160,7 @@ func (h *MetricUpdateBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *MetricUpdateBodyHandler) RegisterRoute(r chi.Router) {
-	r.Post("/update/", h.serveHTTP)
+	r.Post("/update/", h.Update)
 }
 
 // Functional options for MetricUpdatesBodyHandler
@@ -184,7 +185,7 @@ func NewMetricUpdatesBodyHandler(opts ...MetricUpdatesBodyHandlerOption) *Metric
 	return h
 }
 
-func (h *MetricUpdatesBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *MetricUpdatesBodyHandler) Updates(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var metrics []*types.Metrics
@@ -204,7 +205,7 @@ func (h *MetricUpdatesBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Requ
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		switch m.MType {
+		switch m.Type {
 		case types.Counter:
 			if m.Delta == nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -232,5 +233,66 @@ func (h *MetricUpdatesBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *MetricUpdatesBodyHandler) RegisterRoute(r chi.Router) {
-	r.Post("/updates/", h.serveHTTP)
+	r.Post("/updates/", h.Updates)
+}
+
+// MetricUpdaterService implements the gRPC server interface.
+type MetricGRPCUpdaterHandler struct {
+	pb.UnimplementedMetricUpdaterServer
+	updater MetricUpdater
+}
+
+func NewMetricGRPCUpdaterHandler(updater MetricUpdater) *MetricGRPCUpdaterHandler {
+	return &MetricGRPCUpdaterHandler{
+		updater: updater,
+	}
+}
+
+// Convert pb.Metric to types.Metrics
+func toMetric(m *pb.Metric) *types.Metrics {
+	v := m.GetValue()
+	d := m.GetDelta()
+	return &types.Metrics{
+		ID:    m.GetId(),
+		Type:  m.GetType(),
+		Value: &v,
+		Delta: &d,
+	}
+}
+
+// Convert types.Metrics to pb.Metric
+func fromMetric(m *types.Metrics) *pb.Metric {
+	return &pb.Metric{
+		Id:    m.ID,
+		Type:  m.Type,
+		Value: *m.Value,
+		Delta: *m.Delta,
+	}
+}
+
+// Updates implements the gRPC server method, adapting calls to your internal interface.
+func (s *MetricGRPCUpdaterHandler) Updates(
+	ctx context.Context,
+	req *pb.UpdateMetricsRequest,
+) (*pb.UpdateMetricsResponse, error) {
+	metrics := make([]*types.Metrics, 0, len(req.GetMetrics()))
+	for _, m := range req.GetMetrics() {
+		metrics = append(metrics, toMetric(m))
+	}
+
+	updatedMetrics, err := s.updater.Updates(ctx, metrics)
+	if err != nil {
+		return &pb.UpdateMetricsResponse{
+			Error: err.Error(),
+		}, nil
+	}
+
+	respMetrics := make([]*pb.Metric, 0, len(updatedMetrics))
+	for _, m := range updatedMetrics {
+		respMetrics = append(respMetrics, fromMetric(m))
+	}
+
+	return &pb.UpdateMetricsResponse{
+		Metrics: respMetrics,
+	}, nil
 }

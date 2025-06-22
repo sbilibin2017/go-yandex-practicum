@@ -41,7 +41,7 @@ func NewMetricGetPathHandler(opts ...MetricGetPathHandlerOption) *MetricGetPathH
 func (h *MetricGetPathHandler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 
-	mType := chi.URLParam(r, "type")
+	Type := chi.URLParam(r, "type")
 	name := chi.URLParam(r, "name")
 
 	if name == "" {
@@ -49,12 +49,12 @@ func (h *MetricGetPathHandler) serveHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if mType != types.Counter && mType != types.Gauge {
+	if Type != types.Counter && Type != types.Gauge {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	metricID := types.MetricID{ID: name, MType: mType}
+	metricID := types.MetricID{ID: name, Type: Type}
 	metric, err := h.svc.Get(r.Context(), metricID)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -67,7 +67,7 @@ func (h *MetricGetPathHandler) serveHTTP(w http.ResponseWriter, r *http.Request)
 	}
 
 	var valueString string
-	switch mType {
+	switch Type {
 	case types.Counter:
 		if metric.Delta == nil {
 			w.WriteHeader(http.StatusNotFound)
@@ -129,7 +129,7 @@ func (h *MetricGetBodyHandler) serveHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if metricID.MType != types.Counter && metricID.MType != types.Gauge {
+	if metricID.Type != types.Counter && metricID.Type != types.Gauge {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

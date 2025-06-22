@@ -6,63 +6,66 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/sbilibin2017/go-yandex-practicum/internal/types"
+	pb "github.com/sbilibin2017/go-yandex-practicum/protos"
 )
 
 func TestNewMetricFacade_DefaultConfig(t *testing.T) {
 	_, err := NewMetricHTTPFacade()
 	require.NoError(t, err)
-
 }
 
 func TestMetricFacadeOptionFunctions(t *testing.T) {
 	tests := []struct {
 		name     string
-		option   MetricFacadeOption
-		expected func(cfg *MetricFacadeConfig)
-		assertFn func(t *testing.T, cfg *MetricFacadeConfig)
+		option   MetricHTTPFacadeOpt
+		assertFn func(t *testing.T, cfg *MetricHTTPFacade)
 	}{
 		{
 			name:   "WithMetricFacadeServerAddress",
 			option: WithMetricFacadeServerAddress("localhost:8080"),
-			assertFn: func(t *testing.T, cfg *MetricFacadeConfig) {
-				assert.Equal(t, "localhost:8080", cfg.ServerAddress)
+			assertFn: func(t *testing.T, cfg *MetricHTTPFacade) {
+				assert.Equal(t, "localhost:8080", cfg.serverAddress)
 			},
 		},
 		{
 			name:   "WithMetricFacadeHeader",
 			option: WithMetricFacadeHeader("X-Custom-Header"),
-			assertFn: func(t *testing.T, cfg *MetricFacadeConfig) {
-				assert.Equal(t, "X-Custom-Header", cfg.Header)
+			assertFn: func(t *testing.T, cfg *MetricHTTPFacade) {
+				assert.Equal(t, "X-Custom-Header", cfg.header)
 			},
 		},
 		{
 			name:   "WithMetricFacadeKey",
 			option: WithMetricFacadeKey("mysecretkey"),
-			assertFn: func(t *testing.T, cfg *MetricFacadeConfig) {
-				assert.Equal(t, "mysecretkey", cfg.Key)
+			assertFn: func(t *testing.T, cfg *MetricHTTPFacade) {
+				assert.Equal(t, "mysecretkey", cfg.key)
 			},
 		},
 		{
 			name:   "WithMetricFacadeCryptoKeyPath",
 			option: WithMetricFacadeCryptoKeyPath("/path/to/key.pem"),
-			assertFn: func(t *testing.T, cfg *MetricFacadeConfig) {
-				assert.Equal(t, "/path/to/key.pem", cfg.CryptoKeyPath)
+			assertFn: func(t *testing.T, cfg *MetricHTTPFacade) {
+				assert.Equal(t, "/path/to/key.pem", cfg.cryptoKeyPath)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &MetricFacadeConfig{}
+			cfg := &MetricHTTPFacade{}
 			tt.option(cfg)
 			tt.assertFn(t, cfg)
 		})
@@ -74,7 +77,7 @@ func TestCalcBodyHashSum(t *testing.T) {
 	key := "secret"
 	sum := calcBodyHashSum(data, key)
 	assert.NotEmpty(t, sum)
-	assert.Len(t, sum, 64) // length of sha256 hex string
+	assert.Equal(t, 64, len(sum), "expected SHA256 hex string to be 64 characters")
 }
 
 func mustCreateTempFile(t *testing.T, content []byte) string {
@@ -83,9 +86,9 @@ func mustCreateTempFile(t *testing.T, content []byte) string {
 
 	_, err = tmpFile.Write(content)
 	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
 
-	err = tmpFile.Close()
-	require.NoError(t, err)
+	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 	return tmpFile.Name()
 }
@@ -105,18 +108,14 @@ func TestLoadPublicKey(t *testing.T) {
 			{
 				name: "invalid PEM block",
 				setupFile: func(t *testing.T) string {
-					tmp := mustCreateTempFile(t, []byte("not a pem"))
-					return tmp
+					return mustCreateTempFile(t, []byte("not a pem"))
 				},
 				expectError: true,
 			},
 			{
 				name: "wrong PEM block type",
 				setupFile: func(t *testing.T) string {
-					block := &pem.Block{
-						Type:  "WRONG TYPE",
-						Bytes: []byte("some bytes"),
-					}
+					block := &pem.Block{Type: "WRONG TYPE", Bytes: []byte("some bytes")}
 					return mustCreateTempFile(t, pem.EncodeToMemory(block))
 				},
 				expectError: true,
@@ -124,10 +123,7 @@ func TestLoadPublicKey(t *testing.T) {
 			{
 				name: "invalid key bytes in PEM",
 				setupFile: func(t *testing.T) string {
-					block := &pem.Block{
-						Type:  "PUBLIC KEY",
-						Bytes: []byte("invalid key bytes"),
-					}
+					block := &pem.Block{Type: "PUBLIC KEY", Bytes: []byte("invalid key bytes")}
 					return mustCreateTempFile(t, pem.EncodeToMemory(block))
 				},
 				expectError: true,
@@ -139,10 +135,7 @@ func TestLoadPublicKey(t *testing.T) {
 					require.NoError(t, err)
 					pubASN1, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 					require.NoError(t, err)
-					block := &pem.Block{
-						Type:  "PUBLIC KEY",
-						Bytes: pubASN1,
-					}
+					block := &pem.Block{Type: "PUBLIC KEY", Bytes: pubASN1}
 					return mustCreateTempFile(t, pem.EncodeToMemory(block))
 				},
 				expectError: false,
@@ -152,9 +145,6 @@ func TestLoadPublicKey(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				path := tt.setupFile(t)
-				if path != "nonexistent_file.pem" {
-					defer os.Remove(path)
-				}
 				pubKey, err := loadPublicKey(path)
 				if tt.expectError {
 					assert.Error(t, err)
@@ -183,38 +173,31 @@ func TestEncryptBody(t *testing.T) {
 		encrypted, err := encryptBody(data, &privKey.PublicKey)
 		require.NoError(t, err)
 		assert.NotEqual(t, data, encrypted)
+		assert.Greater(t, len(encrypted), 0)
 	})
 }
 
 func createTempPublicKeyFile(t *testing.T) string {
-	// Generate a test RSA key pair
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	pubASN1, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	pubPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: pubASN1,
-	})
-
-	tmpFile, err := os.CreateTemp("", "test_pubkey_*.pem") // updated from ioutil.TempFile
-	assert.NoError(t, err)
-
+	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubASN1})
+	tmpFile, err := os.CreateTemp("", "test_pubkey_*.pem")
+	require.NoError(t, err)
 	_, err = tmpFile.Write(pubPEM)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	require.NoError(t, tmpFile.Close())
 
-	err = tmpFile.Close()
-	assert.NoError(t, err)
+	t.Cleanup(func() { os.Remove(tmpFile.Name()) })
 
 	return tmpFile.Name()
 }
 
 func TestNewMetricFacade_WithValidCryptoKeyPath(t *testing.T) {
 	path := createTempPublicKeyFile(t)
-	defer os.Remove(path)
-
 	mf, err := NewMetricHTTPFacade(WithMetricFacadeCryptoKeyPath(path))
 	assert.NoError(t, err)
 	assert.NotNil(t, mf)
@@ -222,33 +205,23 @@ func TestNewMetricFacade_WithValidCryptoKeyPath(t *testing.T) {
 }
 
 func TestNewMetricFacade_WithInvalidCryptoKeyPath(t *testing.T) {
-	// File does not exist
 	mf, err := NewMetricHTTPFacade(WithMetricFacadeCryptoKeyPath("/non/existing/file.pem"))
 	assert.Error(t, err)
 	assert.Nil(t, mf)
 }
 
 func TestNewMetricFacade_WithInvalidPEMFile(t *testing.T) {
-	// Create temp file with invalid content
-	tmpFile, err := os.CreateTemp("", "invalid_pem_*.pem")
-	assert.NoError(t, err)
-	_, err = tmpFile.Write([]byte("not a valid pem"))
-	assert.NoError(t, err)
-	err = tmpFile.Close()
-	assert.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
-
-	mf, err := NewMetricHTTPFacade(WithMetricFacadeCryptoKeyPath(tmpFile.Name()))
+	tmpFile := mustCreateTempFile(t, []byte("not a valid pem"))
+	mf, err := NewMetricHTTPFacade(WithMetricFacadeCryptoKeyPath(tmpFile))
 	assert.Error(t, err)
 	assert.Nil(t, mf)
 }
 
 func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 	ctx := context.Background()
-
 	v := float64(42)
 	sampleMetrics := []*types.Metrics{
-		{ID: "metric1", MType: "gauge", Value: &v},
+		{ID: "metric1", Type: "gauge", Value: &v},
 	}
 
 	tests := []struct {
@@ -270,7 +243,6 @@ func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 			name:    "successful update without encryption and hash",
 			metrics: sampleMetrics,
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				// Just respond OK
 				w.WriteHeader(http.StatusOK)
 			},
 			wantErr:        false,
@@ -291,7 +263,6 @@ func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 			key:     "test-secret",
 			header:  "X-Signature",
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
-				// Check the presence of HMAC header
 				if r.Header.Get("X-Signature") == "" {
 					http.Error(w, "missing signature header", http.StatusBadRequest)
 					return
@@ -304,7 +275,7 @@ func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 			name:    "encryption error triggers failure",
 			metrics: sampleMetrics,
 			publicKey: &rsa.PublicKey{
-				N: nil, // invalid key will cause encryption error
+				N: new(big.Int), // non-nil but invalid
 				E: 65537,
 			},
 			serverHandler: func(w http.ResponseWriter, r *http.Request) {
@@ -316,25 +287,19 @@ func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a real HTTP test server with the handler from the test case
 			server := httptest.NewServer(tt.serverHandler)
 			defer server.Close()
 
-			// Build MetricFacade with the server URL and config from test case
 			mf, err := NewMetricHTTPFacade(
 				WithMetricFacadeServerAddress(server.URL),
 				WithMetricFacadeKey(tt.key),
 				WithMetricFacadeHeader(tt.header),
-				func(cfg *MetricFacadeConfig) {
-					cfg.CryptoKeyPath = "" // disable loading from path
-				},
+				func(f *MetricHTTPFacade) { f.cryptoKeyPath = "" },
 			)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
-			// Override publicKey directly if set in test case
 			mf.publicKey = tt.publicKey
 
-			// Call Updates and check result
 			err = mf.Updates(ctx, tt.metrics)
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -343,4 +308,74 @@ func TestMetricFacade_Updates_WithRealHTTPServer(t *testing.T) {
 			}
 		})
 	}
+}
+
+// MockMetricUpdaterClient mocks pb.MetricUpdaterClient interface
+type MockMetricUpdaterClient struct {
+	mock.Mock
+}
+
+func (m *MockMetricUpdaterClient) Updates(ctx context.Context, req *pb.UpdateMetricsRequest, opts ...grpc.CallOption) (*pb.UpdateMetricsResponse, error) {
+	args := m.Called(ctx, req)
+	if resp, ok := args.Get(0).(*pb.UpdateMetricsResponse); ok {
+		return resp, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func TestMetricGRPCFacade_Updates(t *testing.T) {
+	float64Ptr := func(f float64) *float64 { return &f }
+	int64Ptr := func(i int64) *int64 { return &i }
+
+	mockClient := new(MockMetricUpdaterClient)
+	facade := &MetricGRPCFacade{client: mockClient}
+
+	t.Run("returns nil on empty metrics slice", func(t *testing.T) {
+		err := facade.Updates(context.Background(), []*types.Metrics{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("returns error when grpc client returns error", func(t *testing.T) {
+		mockClient.On("Updates", mock.Anything, mock.Anything).Return(nil, errors.New("rpc error")).Once()
+		err := facade.Updates(context.Background(), []*types.Metrics{{ID: "metric1", Type: "gauge", Value: float64Ptr(1.23)}})
+		assert.EqualError(t, err, "rpc error")
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("returns error when response contains error string", func(t *testing.T) {
+		mockClient.On("Updates", mock.Anything, mock.Anything).Return(&pb.UpdateMetricsResponse{Error: "some error"}, nil).Once()
+		err := facade.Updates(context.Background(), []*types.Metrics{{ID: "metric2", Type: "counter", Delta: int64Ptr(42)}})
+		assert.EqualError(t, err, "some error")
+		mockClient.AssertExpectations(t)
+	})
+
+	t.Run("successfully sends metrics", func(t *testing.T) {
+		mockClient.On("Updates", mock.Anything, mock.MatchedBy(func(req *pb.UpdateMetricsRequest) bool {
+			return len(req.Metrics) == 2 && req.Metrics[0].Id == "metric1" && req.Metrics[1].Id == "metric2"
+		})).Return(&pb.UpdateMetricsResponse{}, nil).Once()
+
+		metrics := []*types.Metrics{
+			{ID: "metric1", Type: "gauge", Value: float64Ptr(3.14)},
+			{ID: "metric2", Type: "counter", Delta: int64Ptr(100)},
+		}
+		err := facade.Updates(context.Background(), metrics)
+		assert.NoError(t, err)
+		mockClient.AssertExpectations(t)
+	})
+}
+
+func TestNewMetricGRPCFacade(t *testing.T) {
+	t.Run("creates facade successfully with valid address (may fail if no server)", func(t *testing.T) {
+		f, err := NewMetricGRPCFacade(WithMetricGRPCServerAddress("localhost:50051"))
+		if err != nil {
+			t.Logf("expected error dialing gRPC server: %v", err)
+			assert.Nil(t, f)
+		} else {
+			assert.NotNil(t, f)
+			assert.Equal(t, "localhost:50051", f.serverAddress)
+			assert.NotNil(t, f.conn)
+			assert.NotNil(t, f.client)
+			_ = f.Close()
+		}
+	})
 }

@@ -28,7 +28,7 @@ func TestMetricFileSaveRepository_Save(t *testing.T) {
 
 	metric := types.Metrics{
 		ID:    "metric1",
-		MType: types.Gauge,
+		Type:  types.Gauge,
 		Value: float64Ptr(123.45),
 		Delta: nil,
 	}
@@ -44,7 +44,7 @@ func TestMetricFileSaveRepository_Save(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, metric.ID, savedMetric.ID)
-	assert.Equal(t, metric.MType, savedMetric.MType)
+	assert.Equal(t, metric.Type, savedMetric.Type)
 	assert.NotNil(t, savedMetric.Value)
 	assert.Equal(t, *metric.Value, *savedMetric.Value)
 	assert.Nil(t, savedMetric.Delta)
@@ -57,8 +57,8 @@ func TestMetricFileGetRepository_Get(t *testing.T) {
 	ctx := context.Background()
 
 	metrics := []types.Metrics{
-		{ID: "m1", MType: types.Counter, Value: nil, Delta: int64Ptr(10)},
-		{ID: "m2", MType: types.Gauge, Value: float64Ptr(3.14), Delta: nil},
+		{ID: "m1", Type: types.Counter, Value: nil, Delta: int64Ptr(10)},
+		{ID: "m2", Type: types.Gauge, Value: float64Ptr(3.14), Delta: nil},
 	}
 
 	f, err := os.OpenFile(tmpFile, os.O_WRONLY, 0644)
@@ -81,19 +81,19 @@ func TestMetricFileGetRepository_Get(t *testing.T) {
 	}{
 		{
 			name:       "existing counter metric",
-			id:         types.MetricID{ID: "m1", MType: types.Counter},
+			id:         types.MetricID{ID: "m1", Type: types.Counter},
 			wantMetric: &metrics[0],
 			wantErr:    false,
 		},
 		{
 			name:       "existing gauge metric",
-			id:         types.MetricID{ID: "m2", MType: types.Gauge},
+			id:         types.MetricID{ID: "m2", Type: types.Gauge},
 			wantMetric: &metrics[1],
 			wantErr:    false,
 		},
 		{
 			name:       "non-existing metric",
-			id:         types.MetricID{ID: "unknown", MType: types.Gauge},
+			id:         types.MetricID{ID: "unknown", Type: types.Gauge},
 			wantMetric: nil,
 			wantErr:    false,
 		},
@@ -119,9 +119,9 @@ func TestMetricFileListRepository_List(t *testing.T) {
 	ctx := context.Background()
 
 	metrics := []types.Metrics{
-		{ID: "a", MType: types.Counter, Value: nil, Delta: int64Ptr(1)},
-		{ID: "b", MType: types.Gauge, Value: float64Ptr(2.0), Delta: nil},
-		{ID: "c", MType: types.Counter, Value: nil, Delta: int64Ptr(3)},
+		{ID: "a", Type: types.Counter, Value: nil, Delta: int64Ptr(1)},
+		{ID: "b", Type: types.Gauge, Value: float64Ptr(2.0), Delta: nil},
+		{ID: "c", Type: types.Counter, Value: nil, Delta: int64Ptr(3)},
 	}
 
 	f, err := os.OpenFile(tmpFile, os.O_WRONLY, 0644)

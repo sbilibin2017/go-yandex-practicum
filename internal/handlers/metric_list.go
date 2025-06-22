@@ -52,7 +52,7 @@ func (h *MetricListHTMLHandler) serveHTTP(w http.ResponseWriter, r *http.Request
 	var builder strings.Builder
 	builder.WriteString("<!DOCTYPE html><html><head><title>Metrics</title></head><body><ul>\n")
 	for _, m := range metrics {
-		switch m.MType {
+		switch m.Type {
 		case types.Gauge:
 			if m.Value != nil {
 				builder.WriteString(fmt.Sprintf("<li>%s: %v</li>\n", m.ID, *m.Value))

@@ -56,7 +56,7 @@ func (r *MetricDBSaveRepository) Save(ctx context.Context, metric types.Metrics)
 
 	_, err := execer.ExecContext(ctx, metricSaveQuery,
 		metric.ID,
-		metric.MType,
+		metric.Type,
 		metric.Delta,
 		metric.Value,
 	)
@@ -112,7 +112,7 @@ func (r *MetricDBGetRepository) Get(ctx context.Context, id types.MetricID) (*ty
 	}
 
 	var metric types.Metrics
-	err := sqlx.GetContext(ctx, querier, &metric, metricGetQuery, id.ID, id.MType)
+	err := sqlx.GetContext(ctx, querier, &metric, metricGetQuery, id.ID, id.Type)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil

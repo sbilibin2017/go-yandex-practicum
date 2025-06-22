@@ -43,7 +43,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 				metrics: []*types.Metrics{
 					{
 						ID:    "metric1",
-						MType: types.Counter,
+						Type:  types.Counter,
 						Delta: ptrInt64(10),
 					},
 				},
@@ -51,21 +51,21 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 			want: []*types.Metrics{
 				{
 					ID:    "metric1",
-					MType: types.Counter,
+					Type:  types.Counter,
 					Delta: ptrInt64(15), // 5 (existing) + 10 (new)
 				},
 			},
 			setupMocks: func(f fields, a args) {
 				// Simulate existing metric with Delta = 5
 				f.getter.EXPECT().
-					Get(gomock.Any(), types.MetricID{ID: "metric1", MType: types.Counter}).
-					Return(&types.Metrics{ID: "metric1", MType: types.Counter, Delta: ptrInt64(5)}, nil)
+					Get(gomock.Any(), types.MetricID{ID: "metric1", Type: types.Counter}).
+					Return(&types.Metrics{ID: "metric1", Type: types.Counter, Delta: ptrInt64(5)}, nil)
 
 				// Expect Save with updated delta (5 + 10 = 15)
 				f.saver.EXPECT().
 					Save(gomock.Any(), types.Metrics{
 						ID:    "metric1",
-						MType: types.Counter,
+						Type:  types.Counter,
 						Delta: ptrInt64(15),
 					}).
 					Return(nil)
@@ -81,7 +81,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 				metrics: []*types.Metrics{
 					{
 						ID:    "gauge1",
-						MType: types.Gauge,
+						Type:  types.Gauge,
 						Value: ptrFloat64(3.14),
 					},
 				},
@@ -89,7 +89,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 			want: []*types.Metrics{
 				{
 					ID:    "gauge1",
-					MType: types.Gauge,
+					Type:  types.Gauge,
 					Value: ptrFloat64(3.14),
 				},
 			},
@@ -112,7 +112,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 				metrics: []*types.Metrics{
 					{
 						ID:    "metric1",
-						MType: types.Counter,
+						Type:  types.Counter,
 						Delta: ptrInt64(1),
 					},
 				},
@@ -134,7 +134,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 				metrics: []*types.Metrics{
 					{
 						ID:    "metric1",
-						MType: types.Gauge,
+						Type:  types.Gauge,
 						Value: ptrFloat64(2.71),
 					},
 				},
@@ -167,7 +167,7 @@ func TestMetricUpdatesService_Updates(t *testing.T) {
 			require.Equal(t, len(tt.want), len(got))
 			for i := range got {
 				require.Equal(t, tt.want[i].ID, got[i].ID)
-				require.Equal(t, tt.want[i].MType, got[i].MType)
+				require.Equal(t, tt.want[i].Type, got[i].Type)
 				if tt.want[i].Delta != nil {
 					require.Equal(t, *tt.want[i].Delta, *got[i].Delta)
 				} else {
@@ -201,15 +201,15 @@ func TestMetricGetService_Get(t *testing.T) {
 	}{
 		{
 			name:       "metric found",
-			metricID:   types.MetricID{ID: "id1", MType: types.Gauge},
-			mockReturn: &types.Metrics{ID: "id1", MType: types.Gauge, Value: ptrFloat64(1.23)},
+			metricID:   types.MetricID{ID: "id1", Type: types.Gauge},
+			mockReturn: &types.Metrics{ID: "id1", Type: types.Gauge, Value: ptrFloat64(1.23)},
 			mockErr:    nil,
-			want:       &types.Metrics{ID: "id1", MType: types.Gauge, Value: ptrFloat64(1.23)},
+			want:       &types.Metrics{ID: "id1", Type: types.Gauge, Value: ptrFloat64(1.23)},
 			wantErr:    false,
 		},
 		{
 			name:       "metric not found",
-			metricID:   types.MetricID{ID: "id2", MType: types.Counter},
+			metricID:   types.MetricID{ID: "id2", Type: types.Counter},
 			mockReturn: nil,
 			mockErr:    nil,
 			want:       nil,
@@ -217,7 +217,7 @@ func TestMetricGetService_Get(t *testing.T) {
 		},
 		{
 			name:       "getter error",
-			metricID:   types.MetricID{ID: "id3", MType: types.Counter},
+			metricID:   types.MetricID{ID: "id3", Type: types.Counter},
 			mockReturn: nil,
 			mockErr:    errors.New("db failure"),
 			want:       nil,
@@ -261,13 +261,13 @@ func TestMetricListService_List(t *testing.T) {
 		{
 			name: "list success",
 			mockReturn: []*types.Metrics{
-				{ID: "m1", MType: types.Gauge, Value: ptrFloat64(1.0)},
-				{ID: "m2", MType: types.Counter, Delta: ptrInt64(100)},
+				{ID: "m1", Type: types.Gauge, Value: ptrFloat64(1.0)},
+				{ID: "m2", Type: types.Counter, Delta: ptrInt64(100)},
 			},
 			mockErr: nil,
 			want: []*types.Metrics{
-				{ID: "m1", MType: types.Gauge, Value: ptrFloat64(1.0)},
-				{ID: "m2", MType: types.Counter, Delta: ptrInt64(100)},
+				{ID: "m1", Type: types.Gauge, Value: ptrFloat64(1.0)},
+				{ID: "m2", Type: types.Counter, Delta: ptrInt64(100)},
 			},
 			wantErr: false,
 		},

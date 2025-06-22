@@ -36,8 +36,8 @@ func (r *MetricMemorySaveRepository) Save(ctx context.Context, metric types.Metr
 	defer muMemory.Unlock()
 
 	key := types.MetricID{
-		ID:    metric.ID,
-		MType: metric.MType,
+		ID:   metric.ID,
+		Type: metric.Type,
 	}
 
 	data[key] = metric

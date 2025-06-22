@@ -16,7 +16,7 @@ func TestMetricContextSaveRepository_Save(t *testing.T) {
 	defer ctrl.Finish()
 
 	ctx := context.Background()
-	metric := types.Metrics{ID: "id1", MType: "gauge"}
+	metric := types.Metrics{ID: "id1", Type: "gauge"}
 
 	tests := []struct {
 		name      string
@@ -62,8 +62,8 @@ func TestMetricContextGetRepository_Get(t *testing.T) {
 	defer ctrl.Finish()
 
 	ctx := context.Background()
-	id := types.MetricID{ID: "id1", MType: "counter"}
-	expectedMetric := &types.Metrics{ID: "id1", MType: "counter"}
+	id := types.MetricID{ID: "id1", Type: "counter"}
+	expectedMetric := &types.Metrics{ID: "id1", Type: "counter"}
 
 	tests := []struct {
 		name       string
@@ -123,8 +123,8 @@ func TestMetricContextListRepository_List(t *testing.T) {
 
 	ctx := context.Background()
 	metricsList := []*types.Metrics{
-		{ID: "id1", MType: "gauge"},
-		{ID: "id2", MType: "counter"},
+		{ID: "id1", Type: "gauge"},
+		{ID: "id2", Type: "counter"},
 	}
 
 	tests := []struct {

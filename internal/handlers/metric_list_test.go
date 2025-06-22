@@ -33,12 +33,12 @@ func TestMetricListHTMLHandler_serveHTTP(t *testing.T) {
 				m.EXPECT().List(gomock.Any()).Return([]*types.Metrics{
 					{
 						ID:    "metric_gauge",
-						MType: types.Gauge,
+						Type:  types.Gauge,
 						Value: float64Ptr(3.14),
 					},
 					{
 						ID:    "metric_counter",
-						MType: types.Counter,
+						Type:  types.Counter,
 						Delta: int64Ptr(42),
 					},
 				}, nil)
@@ -66,8 +66,8 @@ func TestMetricListHTMLHandler_serveHTTP(t *testing.T) {
 			name: "metrics with nil values",
 			mockSetup: func(m *MockMetricLister) {
 				m.EXPECT().List(gomock.Any()).Return([]*types.Metrics{
-					{ID: "gauge_nil", MType: types.Gauge, Value: nil},
-					{ID: "counter_nil", MType: types.Counter, Delta: nil},
+					{ID: "gauge_nil", Type: types.Gauge, Value: nil},
+					{ID: "counter_nil", Type: types.Counter, Delta: nil},
 				}, nil)
 			},
 			expectedCode: http.StatusOK,
