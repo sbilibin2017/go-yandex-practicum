@@ -1,4 +1,4 @@
-package middlewares
+package middlewares_test
 
 import (
 	"context"
@@ -11,255 +11,156 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/sbilibin2017/go-yandex-practicum/internal/middlewares"
 )
 
-func TestTxMiddleware_NoDB(t *testing.T) {
-	handlerCalled := false
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handlerCalled = true
-		w.WriteHeader(http.StatusOK)
-	})
+// define custom type for context keys
+type ctxKey string
 
-	mw := TxMiddleware(nil)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	mw(handler).ServeHTTP(rr, req)
-
-	assert.True(t, handlerCalled, "handler should be called when DB is nil")
-	assert.Equal(t, http.StatusOK, rr.Code)
-}
-
-func TestTxMiddleware_BeginFails(t *testing.T) {
+func setupMockDB(t *testing.T) (*sqlx.DB, sqlmock.Sqlmock, func()) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
-
 	sqlxDB := sqlx.NewDb(db, "sqlmock")
 
-	// simulate begin failure
-	mock.ExpectBegin().WillReturnError(errors.New("begin failed"))
+	cleanup := func() {
+		sqlxDB.Close()
+	}
 
-	mw := TxMiddleware(sqlxDB)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler should NOT be called if begin fails")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	mw(handler).ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rr.Code)
-	require.NoError(t, mock.ExpectationsWereMet())
+	return sqlxDB, mock, cleanup
 }
 
-func TestTxMiddleware_CommitSuccess(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
+func TestTxMiddleware_SuccessfulCommit(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
 	mock.ExpectBegin()
 	mock.ExpectCommit()
 
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
+	require.NoError(t, err)
+
 	handlerCalled := false
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
-		// Ensure tx is in context
-		tx := getTx(r.Context())
-		assert.NotNil(t, tx)
 		w.WriteHeader(http.StatusOK)
-	})
-
-	mw := TxMiddleware(sqlxDB)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	mw(handler).ServeHTTP(rr, req)
-
-	assert.True(t, handlerCalled)
-	assert.Equal(t, http.StatusOK, rr.Code)
-	require.NoError(t, mock.ExpectationsWereMet())
-}
-
-func TestTxMiddleware_HandlerErrorRollback(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-
-	mock.ExpectBegin()
-	mock.ExpectRollback()
-
-	mw := TxMiddleware(sqlxDB)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("simulated panic")
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	defer func() {
-		r := recover()
-		assert.Equal(t, "simulated panic", r)
-		require.NoError(t, mock.ExpectationsWereMet())
-	}()
-
-	mw(handler).ServeHTTP(rr, req)
-}
-
-func TestWithTx(t *testing.T) {
-	// Helper to create context with a mocked tx
-	setupTxCtx := func(t *testing.T) (context.Context, sqlmock.Sqlmock, *sqlx.Tx) {
-		db, mock, err := sqlmock.New()
-		require.NoError(t, err)
-		sqlxDB := sqlx.NewDb(db, "sqlmock")
-
-		mock.ExpectBegin()
-		tx, err := sqlxDB.BeginTxx(context.Background(), nil)
-		require.NoError(t, err)
-
-		ctx := setTx(context.Background(), tx)
-		return ctx, mock, tx
-	}
-
-	t.Run("no transaction in context", func(t *testing.T) {
-		err := withTx(context.Background(), func(ctx context.Context) error {
-			return nil
-		})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no transaction in context")
-	})
-
-	t.Run("fn returns error triggers rollback", func(t *testing.T) {
-		ctx, mock, _ := setupTxCtx(t)
-		mock.ExpectRollback()
-
-		testErr := errors.New("handler error")
-
-		err := withTx(ctx, func(ctx context.Context) error {
-			return testErr
-		})
-
-		assert.Equal(t, testErr, err)
-		require.NoError(t, mock.ExpectationsWereMet())
-	})
-
-	t.Run("fn panics triggers rollback and rethrows", func(t *testing.T) {
-		ctx, mock, _ := setupTxCtx(t)
-		mock.ExpectRollback()
-
-		panicMsg := "panic inside fn"
-
-		defer func() {
-			if r := recover(); r != nil {
-				assert.Equal(t, panicMsg, r)
-			}
-		}()
-
-		// Call withTx that panics inside the function
-		_ = withTx(ctx, func(ctx context.Context) error {
-			panic(panicMsg)
-		})
-	})
-
-	t.Run("fn returns nil commits successfully", func(t *testing.T) {
-		ctx, mock, _ := setupTxCtx(t)
-		mock.ExpectCommit()
-
-		err := withTx(ctx, func(ctx context.Context) error {
-			return nil
-		})
-
-		assert.NoError(t, err)
-		require.NoError(t, mock.ExpectationsWereMet())
-	})
-
-	t.Run("commit failure triggers rollback and returns error", func(t *testing.T) {
-		ctx, mock, _ := setupTxCtx(t)
-
-		mock.ExpectCommit().WillReturnError(errors.New("commit failure"))
-		// No rollback expected on commit failure
-
-		err := withTx(ctx, func(ctx context.Context) error {
-			return nil
-		})
-
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "commit failure")
-		require.NoError(t, mock.ExpectationsWereMet())
-	})
-}
-
-func TestTxMiddleware_HandlerErrorWrites500IfNoHeader(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	defer db.Close()
-
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
-
-	mock.ExpectBegin()
-	mock.ExpectRollback()
-
-	middleware := TxMiddleware(sqlxDB)
-
-	handlerWithPanic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("handler panic")
-	})
-
-	h := middleware(handlerWithPanic)
+		w.Write([]byte("ok"))
+	}))
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	defer func() {
-		if r := recover(); r != nil {
-			_ = r // swallow panic intentionally to avoid empty branch
-		}
-	}()
+	handler.ServeHTTP(rec, req)
 
-	h.ServeHTTP(rec, req)
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "ok", rec.Body.String())
 
-	assert.Equal(t, 0, rec.Code)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestResponseRecorder_Write(t *testing.T) {
-	underlying := httptest.NewRecorder()
+func TestTxMiddleware_BeginTxFails(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
-	rec := &responseRecorder{
-		ResponseWriter: underlying,
-	}
+	mock.ExpectBegin().WillReturnError(errors.New("begin tx failed"))
 
-	data := []byte("hello world")
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
+	require.NoError(t, err)
 
-	n, err := rec.Write(data)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called if begin tx fails")
+	}))
 
-	assert.NoError(t, err)
-	assert.Equal(t, len(data), n)
-	assert.Equal(t, string(data), underlying.Body.String())
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGetExecutor(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	require.NoError(t, err)
-	sqlxDB := sqlx.NewDb(db, "sqlmock")
+func TestTxMiddleware_CommitFails_TriggersRollback(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
 
 	mock.ExpectBegin()
-	tx, err := sqlxDB.BeginTxx(context.Background(), nil)
+	mock.ExpectCommit().WillReturnError(errors.New("commit failed"))
+	mock.ExpectRollback()
+
+	middleware, err := middlewares.TxMiddleware(middlewares.WithDB(sqlxDB))
 	require.NoError(t, err)
 
-	ctxWithTx := setTx(context.Background(), tx)
-	executor := GetExecutor(ctxWithTx, sqlxDB)
-	assert.Equal(t, tx, executor)
+	handlerCalled := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("response"))
+	}))
 
-	ctxWithoutTx := context.Background()
-	executor = GetExecutor(ctxWithoutTx, sqlxDB)
-	assert.Equal(t, sqlxDB, executor)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestTxMiddleware_NoDBConfigured_CallsNextDirectly(t *testing.T) {
+	middleware, err := middlewares.TxMiddleware() // no DB option
+	require.NoError(t, err)
+
+	handlerCalled := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("no db"))
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.True(t, handlerCalled)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no db", rec.Body.String())
+}
+
+func TestTxMiddleware_TxSetterInjectsTx(t *testing.T) {
+	sqlxDB, mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	var capturedTx *sqlx.Tx
+
+	txSetter := func(ctx context.Context, tx *sqlx.Tx) context.Context {
+		capturedTx = tx
+		return context.WithValue(ctx, ctxKey("tx"), tx)
+	}
+
+	middleware, err := middlewares.TxMiddleware(
+		middlewares.WithDB(sqlxDB),
+		middlewares.WithTxSetter(txSetter),
+	)
+	require.NoError(t, err)
+
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		txFromCtx := r.Context().Value(ctxKey("tx"))
+		assert.NotNil(t, txFromCtx)
+		assert.Equal(t, capturedTx, txFromCtx)
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

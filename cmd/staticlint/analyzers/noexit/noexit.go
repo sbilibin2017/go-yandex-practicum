@@ -1,21 +1,8 @@
-// Package noexit предоставляет статический анализатор для Go,
-// запрещающий прямые вызовы os.Exit в функции main пакета main.
+// Package noexit provides an analyzer that forbids direct calls to os.Exit
+// inside the main function of the main package.
 //
-// Это позволяет повысить тестируемость и читаемость кода, а также
-// избежать неожиданного завершения приложения.
-//
-// Анализатор предназначен для использования в составе multichecker.
-//
-// Пример:
-//
-//	func main() {
-//	    if err := run(); err != nil {
-//	        fmt.Fprintln(os.Stderr, err)
-//	        os.Exit(1) // ❌ Этот вызов будет запрещён анализатором noexit
-//	    }
-//	}
-//
-// Чтобы избежать ошибки, перенесите os.Exit из main в другую функцию.
+// This is useful to enforce graceful shutdown and proper error handling
+// instead of abrupt termination using os.Exit.
 package noexit
 
 import (
@@ -24,37 +11,29 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// Analyzer проверяет, что в функции main пакета main отсутствует
-// прямой вызов os.Exit.
-//
-// Это помогает соблюдать практику чистого выхода из main через возврат
-// кода завершения или делегирование ошибки другим функциям.
+// Analyzer is a static analysis Analyzer that reports any direct calls to os.Exit
+// inside the main function of the main package.
 var Analyzer = &analysis.Analyzer{
 	Name: "noexit",
 	Doc:  "forbids direct calls to os.Exit in function main of package main",
 	Run:  run,
 }
 
-// run выполняет анализ кода для поиска вызова os.Exit в функции main.
-//
-// Функция проходит по каждому AST-файлу пакета, проверяет, что
-// пакет называется "main", а затем ищет вызовы os.Exit в теле функции main.
+// run implements the analysis logic.
+// It inspects the AST of the package and reports diagnostics if a call to os.Exit
+// is found inside the main function of the main package.
 func run(pass *analysis.Pass) (interface{}, error) {
-	// Проверяем, что пакет называется main
 	if pass.Pkg.Name() != "main" {
 		return nil, nil
 	}
 
-	// Проходим по каждому файлу пакета
 	for _, file := range pass.Files {
-		// Ищем функцию main
 		ast.Inspect(file, func(n ast.Node) bool {
 			fn, ok := n.(*ast.FuncDecl)
 			if !ok || fn.Name.Name != "main" {
 				return true
 			}
 
-			// В теле main ищем вызовы os.Exit
 			ast.Inspect(fn.Body, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
@@ -74,7 +53,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 				return true
 			})
 
-			return false // main функция одна — дальше не ищем
+			return false
 		})
 	}
 	return nil, nil

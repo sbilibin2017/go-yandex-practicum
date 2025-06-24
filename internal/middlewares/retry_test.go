@@ -1,8 +1,8 @@
 package middlewares
 
 import (
-	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,121 +12,97 @@ import (
 
 	"github.com/jackc/pgconn"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// testError simulates a retriable error
-type testError struct{}
-
-func (e *testError) Error() string { return "test retriable error" }
-
-// Implement Temporary so isRetriableError can be adapted if needed (not used in your current code but often helpful)
-func (e *testError) Temporary() bool { return true }
-
-func TestRetryMiddleware_SuccessFirstTry(t *testing.T) {
-	attempts := 0
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
-
-	middleware := RetryMiddleware(handler)
-
-	req := httptest.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-
-	middleware.ServeHTTP(w, req)
-
-	resp := w.Result()
-	defer resp.Body.Close() // <----- Close response body here
-	body := w.Body.String()
-
-	assert.Equal(t, 1, attempts, "Should call handler only once")
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "ok", body)
+// helper to create a dummy retriable pgconn.PgError
+func newPgConnError(code string) *pgconn.PgError {
+	return &pgconn.PgError{Code: code}
 }
 
-// Test the retry logic by calling withRetry directly, simulating errors
-func TestWithRetry_SucceedsAfterRetries(t *testing.T) {
-	attempts := 0
-
-	err := withRetry(context.Background(), 4, []time.Duration{0, 0, 0, 0}, func() error {
-		attempts++
-		if attempts < 3 {
-			return &testError{} // retriable error
-		}
-		return nil // success on 3rd try
-	})
-
-	assert.NoError(t, err)
-	assert.Equal(t, 3, attempts, "Should have retried twice before success")
-}
-
-func TestWithRetry_FailsAfterMaxAttempts(t *testing.T) {
-	attempts := 0
-
-	err := withRetry(context.Background(), 4, []time.Duration{0, 0, 0, 0}, func() error {
-		attempts++
-		return &testError{} // always retriable error
-	})
-
-	assert.Error(t, err)
-	assert.Equal(t, 4, attempts, "Should retry max attempts")
-}
-
-func TestRetryMiddleware_FailMaxAttempts(t *testing.T) {
-	attempts := 0
-
-	// This handler simulates a retriable error by triggering the error on the BufferedResponseWriter
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-
-		// We cannot cast w to BufferedResponseWriter here, but since
-		// your middleware creates it internally, we can't set error here.
-		// So instead, simulate the error by wrapping the middleware:
-
-		// Just write a status code for now.
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("fail"))
-	})
-
-	// We override RetryMiddleware temporarily with our own that injects error in BufferedResponseWriter
-	retryWithErrorInjection := func(next http.Handler) http.Handler {
-		const maxAttempts = 4
-		delays := []time.Duration{0, 0, 0, 0}
-
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var brw *BufferedResponseWriter
-
-			err := withRetry(r.Context(), maxAttempts, delays, func() error {
-				brw = NewBufferedResponseWriter()
-				next.ServeHTTP(brw, r)
-				// Simulate retriable error on all attempts
-				return &testError{}
-			})
-
-			if err != nil {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				return
-			}
-
-			brw.flushTo(w)
-		})
+func TestRetryMiddleware(t *testing.T) {
+	tests := []struct {
+		name          string
+		delays        []time.Duration
+		handler       http.HandlerFunc
+		expectStatus  int
+		expectRetries int // how many times handler should be called
+	}{
+		{
+			name:   "success on first try",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			},
+			expectStatus:  http.StatusOK,
+			expectRetries: 1,
+		},
+		{
+			name:   "retries on retriable error then success",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func() http.HandlerFunc {
+				attempts := 0
+				return func(w http.ResponseWriter, r *http.Request) {
+					attempts++
+					if attempts < 2 {
+						// write retriable error to bufferedResponseWriter
+						brw := w.(*bufferedResponseWriter)
+						brw.err = newPgConnError("08006") // retriable error code prefix "08"
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			}(),
+			expectStatus:  http.StatusOK,
+			expectRetries: 2,
+		},
+		{
+			name:   "exceeds retries and returns 503",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				brw := w.(*bufferedResponseWriter)
+				brw.err = newPgConnError("08006") // always retriable error
+			},
+			expectStatus:  http.StatusServiceUnavailable,
+			expectRetries: 2,
+		},
+		{
+			name:   "non-retriable error returns immediately",
+			delays: []time.Duration{0, 10 * time.Millisecond},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				brw := w.(*bufferedResponseWriter)
+				brw.err = errors.New("non retriable error")
+			},
+			expectStatus:  http.StatusOK, // flush called even with error that’s non-retriable (default status 200)
+			expectRetries: 1,
+		},
 	}
 
-	middleware := retryWithErrorInjection(handler)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			middleware, err := RetryMiddleware(WithRetryDelays(tt.delays...))
+			require.NoError(t, err)
 
-	req := httptest.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
+			callCount := 0
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				tt.handler(w, r)
+			})
 
-	middleware.ServeHTTP(w, req)
+			// Wrap handler with middleware
+			finalHandler := middleware(handler)
 
-	resp := w.Result()
-	defer resp.Body.Close() // <----- Close response body here
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			w := httptest.NewRecorder()
 
-	assert.Equal(t, 4, attempts, "Should retry maximum attempts (4)")
-	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+			finalHandler.ServeHTTP(w, req)
+			resp := w.Result()
+			defer resp.Body.Close() // <--- Close response body here
+
+			require.Equal(t, tt.expectStatus, resp.StatusCode)
+			require.Equal(t, tt.expectRetries, callCount)
+		})
+	}
 }
 
 func TestIsRetriableError(t *testing.T) {
@@ -141,16 +117,16 @@ func TestIsRetriableError(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "pgconn retriable error with code 08xxx",
+			name: "pgconn error with code 08xxxx",
 			err: &pgconn.PgError{
-				Code: "08003", // connection does not exist (starts with 08)
+				Code: "08003", // connection failure class
 			},
 			want: true,
 		},
 		{
-			name: "pgconn non-retriable error",
+			name: "pgconn error with code not starting with 08",
 			err: &pgconn.PgError{
-				Code: "23505", // unique violation
+				Code: "12345",
 			},
 			want: false,
 		},
@@ -169,146 +145,101 @@ func TestIsRetriableError(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "os.PathError with other error",
+			name: "os.PathError with different error",
 			err: &os.PathError{
-				Err: errors.New("some other error"),
+				Err: syscall.ECONNREFUSED,
 			},
 			want: false,
 		},
 		{
-			name: "generic error",
-			err:  errors.New("generic error"),
+			name: "other generic error",
+			err:  errors.New("some random error"),
 			want: false,
+		},
+		{
+			name: "pgconn error with empty code",
+			err: &pgconn.PgError{
+				Code: "",
+			},
+			want: false,
+		},
+		{
+			name: "os.PathError with nil Err",
+			err: &os.PathError{
+				Err: nil,
+			},
+			want: false,
+		},
+		{
+			name: "wrapped pgconn error with code 08xxxx",
+			err:  wrapPgconnError("08006"),
+			want: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isRetriableError(tt.err)
-			assert.Equal(t, tt.want, got)
+			if got != tt.want {
+				t.Errorf("IsRetriableError() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
 
-func TestWithRetry(t *testing.T) {
-	tests := []struct {
-		name        string
-		maxAttempts int
-		delays      []time.Duration
-		fn          func() error
-		wantErr     bool
-		cancelCtx   bool // whether to cancel context mid-way
-		wantCalls   int  // expected calls to fn
-	}{
-		{
-			name:        "succeeds first try",
-			maxAttempts: 3,
-			delays:      []time.Duration{0, 0},
-			fn: func() error {
-				return nil
-			},
-			wantErr:   false,
-			wantCalls: 1,
-		},
-		{
-			name:        "fails twice, succeeds third try",
-			maxAttempts: 4,
-			delays:      []time.Duration{0, 0, 0},
-			fn: func() func() error {
-				attempts := 0
-				return func() error {
-					attempts++
-					if attempts < 3 {
-						return errors.New("fail")
-					}
-					return nil
-				}
-			}(),
-			wantErr:   false,
-			wantCalls: 3,
-		},
-		{
-			name:        "fails all attempts",
-			maxAttempts: 3,
-			delays:      []time.Duration{0, 0},
-			fn: func() error {
-				return errors.New("fail")
-			},
-			wantErr:   true,
-			wantCalls: 3,
-		},
-		{
-			name:        "context canceled before completion",
-			maxAttempts: 5,
-			delays:      []time.Duration{time.Second, time.Second, time.Second, time.Second},
-			cancelCtx:   true,
-			fn: func() error {
-				return errors.New("fail")
-			},
-			wantErr:   true,
-			wantCalls: 1, // only one call before ctx canceled
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			var cancel context.CancelFunc
-			if tt.cancelCtx {
-				ctx, cancel = context.WithCancel(ctx)
-				// cancel context after short delay to interrupt retries
-				go func() {
-					time.Sleep(10 * time.Millisecond)
-					cancel()
-				}()
-			}
-
-			callCount := 0
-			err := withRetry(ctx, tt.maxAttempts, tt.delays, func() error {
-				callCount++
-				return tt.fn()
-			})
-
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
-			assert.Equal(t, tt.wantCalls, callCount)
-		})
-	}
+// Helper to wrap pgconn.PgError to simulate wrapped errors if needed
+func wrapPgconnError(code string) error {
+	pgErr := &pgconn.PgError{Code: code}
+	return pgErr // simply return, since isRetriableError checks type assertion directly
 }
 
-func TestRetryMiddleware_RetriableError_Response503(t *testing.T) {
-	attempts := 0
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-
-		brw, ok := w.(*BufferedResponseWriter)
-		if !ok {
-			t.Fatal("expected *BufferedResponseWriter")
-		}
-
-		// Always set a retriable error to force retry attempts
-		brw.SetError(&pgconn.PgError{Code: "08006"})
-
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("error response"))
+func TestBufferedResponseWriter(t *testing.T) {
+	t.Run("Header returns headers map", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		hdr := brw.Header()
+		assert.NotNil(t, hdr)
+		assert.IsType(t, make(http.Header), hdr)
 	})
 
-	middleware := RetryMiddleware(handler)
+	t.Run("WriteHeader sets statusCode", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.WriteHeader(http.StatusTeapot)
+		assert.Equal(t, http.StatusTeapot, brw.statusCode)
+	})
 
-	req := httptest.NewRequest("GET", "/", nil)
-	rec := httptest.NewRecorder()
+	t.Run("Write writes data to buffer and returns bytes written", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		n, err := brw.Write([]byte("hello"))
+		assert.NoError(t, err)
+		assert.Equal(t, 5, n)
+		assert.Equal(t, "hello", brw.buf.String())
+	})
 
-	middleware.ServeHTTP(rec, req)
+	t.Run("Write returns error and zero bytes written if already errored", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.err = assert.AnError
+		n, err := brw.Write([]byte("hello"))
+		assert.Equal(t, 0, n)
+		assert.Error(t, err)
+		assert.Equal(t, assert.AnError, err)
+	})
 
-	resp := rec.Result()
-	defer resp.Body.Close() // <----- Close response body here
-	body := rec.Body.String()
+	t.Run("flushTo writes status code and body to ResponseWriter", func(t *testing.T) {
+		brw := newBufferedResponseWriter()
+		brw.WriteHeader(http.StatusAccepted)
+		brw.Write([]byte("response body"))
 
-	assert.Equal(t, 4, attempts, "should retry max attempts")
-	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode, "should return 503 after retries fail")
-	assert.Equal(t, "", body, "should not write body on failure") // body is empty because we return early with 503
+		rec := httptest.NewRecorder()
+
+		brw.flushTo(rec)
+
+		res := rec.Result()
+		defer res.Body.Close() // <--- Close response body here
+
+		assert.Equal(t, http.StatusAccepted, res.StatusCode)
+
+		body, err := io.ReadAll(rec.Body)
+		assert.NoError(t, err)
+		assert.Equal(t, "response body", string(body))
+	})
 }

@@ -6,76 +6,122 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGzipMiddleware_CompressesResponse(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, world!"))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
-
-	rr := httptest.NewRecorder()
-
-	middleware := GzipMiddleware(handler)
-	middleware.ServeHTTP(rr, req)
-
-	assert.Equal(t, "gzip", rr.Header().Get("Content-Encoding"))
-
-	gr, err := gzip.NewReader(rr.Body)
-	require.NoError(t, err)
-	defer gr.Close()
-
-	body, err := io.ReadAll(gr)
-	require.NoError(t, err)
-	assert.Equal(t, "Hello, world!", string(body))
-}
-
-func TestGzipMiddleware_DecompressesRequest(t *testing.T) {
-	var receivedBody string
-
+func TestGzipMiddleware(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		receivedBody = string(body)
-		w.Write([]byte("ok"))
+		w.Write(body) // Echo request body as response
 	})
 
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	_, err := zw.Write([]byte("compressed data"))
-	require.NoError(t, err)
-	zw.Close()
-
-	req := httptest.NewRequest(http.MethodPost, "/", &buf)
-	req.Header.Set("Content-Encoding", "gzip")
-
-	rr := httptest.NewRecorder()
 	middleware := GzipMiddleware(handler)
-	middleware.ServeHTTP(rr, req)
 
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "compressed data", receivedBody)
-}
+	// helper to gzip compress data
+	gzipData := func(t *testing.T, data []byte) []byte {
+		var buf bytes.Buffer
+		gzw := gzip.NewWriter(&buf)
+		_, err := gzw.Write(data)
+		require.NoError(t, err)
+		err = gzw.Close()
+		require.NoError(t, err)
+		return buf.Bytes()
+	}
 
-func TestGzipMiddleware_InvalidGzipRequest(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("Handler should not be called on invalid gzip")
-	})
+	tests := []struct {
+		name               string
+		requestBody        []byte
+		contentEncoding    string
+		acceptEncoding     string
+		expectStatus       int
+		expectResponseBody []byte
+		expectGzipResp     bool
+	}{
+		{
+			name:               "plain request, no gzip response",
+			requestBody:        []byte("hello world"),
+			contentEncoding:    "",
+			acceptEncoding:     "",
+			expectStatus:       http.StatusOK,
+			expectResponseBody: []byte("hello world"),
+			expectGzipResp:     false,
+		},
+		{
+			name:               "gzip encoded request, plain response",
+			requestBody:        gzipData(t, []byte("compressed request")),
+			contentEncoding:    "gzip",
+			acceptEncoding:     "",
+			expectStatus:       http.StatusOK,
+			expectResponseBody: []byte("compressed request"),
+			expectGzipResp:     false,
+		},
+		{
+			name:               "plain request, gzip response",
+			requestBody:        []byte("hello gzip response"),
+			contentEncoding:    "",
+			acceptEncoding:     "gzip",
+			expectStatus:       http.StatusOK,
+			expectResponseBody: []byte("hello gzip response"),
+			expectGzipResp:     true,
+		},
+		{
+			name:               "gzip request and gzip response",
+			requestBody:        gzipData(t, []byte("request and response gzip")),
+			contentEncoding:    "gzip",
+			acceptEncoding:     "gzip",
+			expectStatus:       http.StatusOK,
+			expectResponseBody: []byte("request and response gzip"),
+			expectGzipResp:     true,
+		},
+		{
+			name:               "invalid gzip request",
+			requestBody:        []byte("not really gzip"),
+			contentEncoding:    "gzip",
+			acceptEncoding:     "",
+			expectStatus:       http.StatusInternalServerError,
+			expectResponseBody: []byte{}, // <-- fixed here
+			expectGzipResp:     false,
+		},
+	}
 
-	invalidBody := strings.NewReader("not gzip")
-	req := httptest.NewRequest(http.MethodPost, "/", invalidBody)
-	req.Header.Set("Content-Encoding", "gzip")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example.com", bytes.NewReader(tt.requestBody))
+			if tt.contentEncoding != "" {
+				req.Header.Set("Content-Encoding", tt.contentEncoding)
+			}
+			if tt.acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
+			}
 
-	rr := httptest.NewRecorder()
-	middleware := GzipMiddleware(handler)
-	middleware.ServeHTTP(rr, req)
+			w := httptest.NewRecorder()
+			middleware.ServeHTTP(w, req)
+			resp := w.Result()
+			defer resp.Body.Close()
 
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
+			require.Equal(t, tt.expectStatus, resp.StatusCode)
+
+			respBody, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			if tt.expectGzipResp {
+				require.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+
+				// decompress response
+				gzr, err := gzip.NewReader(bytes.NewReader(respBody))
+				require.NoError(t, err)
+				decompressed, err := io.ReadAll(gzr)
+				require.NoError(t, err)
+				require.NoError(t, gzr.Close())
+
+				require.Equal(t, tt.expectResponseBody, decompressed)
+			} else {
+				require.Equal(t, "", resp.Header.Get("Content-Encoding"))
+				require.Equal(t, tt.expectResponseBody, respBody)
+			}
+		})
+	}
 }

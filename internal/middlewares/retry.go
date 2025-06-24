@@ -2,7 +2,6 @@ package middlewares
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -12,113 +11,127 @@ import (
 	"github.com/jackc/pgconn"
 )
 
-// BufferedResponseWriter buffers the response and captures an error.
-type BufferedResponseWriter struct {
-	headers     http.Header
-	body        *bytes.Buffer
-	statusCode  int
-	wroteHeader bool
-	err         error
+// RetryOption defines a functional option for configuring RetryMiddleware.
+type RetryOption func(*retryMiddleware)
+
+// retryMiddleware holds configuration and state for RetryMiddleware.
+type retryMiddleware struct {
+	delays []time.Duration
 }
 
-func NewBufferedResponseWriter() *BufferedResponseWriter {
-	return &BufferedResponseWriter{
+// WithRetryDelays sets custom retry delays for RetryMiddleware.
+//
+// Example:
+//
+//	RetryMiddleware(WithRetryDelays(0, 2*time.Second, 5*time.Second))
+func WithRetryDelays(delays ...time.Duration) RetryOption {
+	return func(mw *retryMiddleware) {
+		mw.delays = delays
+	}
+}
+
+// RetryMiddleware returns an HTTP middleware that retries requests upon retriable errors.
+//
+// It retries up to len(delays) times, waiting for configured delays before each retry (except first).
+// If all retries fail, responds with HTTP 503 Service Unavailable.
+func RetryMiddleware(opts ...RetryOption) (func(http.Handler) http.Handler, error) {
+	mw := &retryMiddleware{
+		delays: []time.Duration{0, time.Second, 3 * time.Second, 5 * time.Second}, // default delays
+	}
+
+	for _, opt := range opts {
+		opt(mw)
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			maxAttempts := len(mw.delays)
+
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				if attempt > 1 {
+					time.Sleep(mw.delays[attempt-1])
+				}
+
+				brw := newBufferedResponseWriter()
+				next.ServeHTTP(brw, r)
+
+				if brw.err == nil {
+					brw.flushTo(w)
+					return
+				}
+
+				if !isRetriableError(brw.err) {
+					brw.flushTo(w)
+					return
+				}
+			}
+
+			w.WriteHeader(http.StatusServiceUnavailable)
+		})
+	}, nil
+}
+
+// bufferedResponseWriter buffers the HTTP response to support retries.
+type bufferedResponseWriter struct {
+	headers    http.Header
+	statusCode int
+	buf        bytes.Buffer
+	err        error
+}
+
+func newBufferedResponseWriter() *bufferedResponseWriter {
+	return &bufferedResponseWriter{
 		headers:    make(http.Header),
-		body:       new(bytes.Buffer),
 		statusCode: http.StatusOK,
 	}
 }
 
-func (brw *BufferedResponseWriter) Header() http.Header {
-	return brw.headers
+func (b *bufferedResponseWriter) Header() http.Header {
+	return b.headers
 }
 
-func (brw *BufferedResponseWriter) Write(b []byte) (int, error) {
-	return brw.body.Write(b)
+func (b *bufferedResponseWriter) WriteHeader(statusCode int) {
+	b.statusCode = statusCode
 }
 
-func (brw *BufferedResponseWriter) WriteHeader(statusCode int) {
-	if brw.wroteHeader {
-		return
+func (b *bufferedResponseWriter) Write(data []byte) (int, error) {
+	if b.err != nil {
+		return 0, b.err
 	}
-	brw.statusCode = statusCode
-	brw.wroteHeader = true
+
+	n, err := b.buf.Write(data)
+	if err != nil {
+		b.err = err
+	}
+	return n, err
 }
 
-// SetError lets handler set an error that middleware will inspect for retries.
-func (brw *BufferedResponseWriter) SetError(err error) {
-	brw.err = err
-}
-
-// flushTo writes buffered headers, status and body to real ResponseWriter.
-func (brw *BufferedResponseWriter) flushTo(w http.ResponseWriter) {
-	for k, vv := range brw.headers {
+func (b *bufferedResponseWriter) flushTo(w http.ResponseWriter) {
+	for k, vv := range b.headers {
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
 	}
-	w.WriteHeader(brw.statusCode)
-	w.Write(brw.body.Bytes())
+	w.WriteHeader(b.statusCode)
+	w.Write(b.buf.Bytes())
 }
 
-func RetryMiddleware(next http.Handler) http.Handler {
-	const maxAttempts = 4
-	delays := []time.Duration{0, time.Second, 3 * time.Second, 5 * time.Second}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var brw *BufferedResponseWriter
-
-		err := withRetry(r.Context(), maxAttempts, delays, func() error {
-			brw = NewBufferedResponseWriter()
-
-			next.ServeHTTP(brw, r)
-
-			if isRetriableError(brw.err) {
-				return brw.err
-			}
-			return nil
-		})
-
-		if err != nil {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-
-		brw.flushTo(w)
-	})
-}
-
-func withRetry(ctx context.Context, maxAttempts int, delays []time.Duration, fn func() error) error {
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := fn()
-		if err == nil {
-			return nil
-		}
-		if attempt == maxAttempts {
-			return err
-		}
-		if attempt-1 < len(delays) {
-			select {
-			case <-time.After(delays[attempt-1]):
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
-	return nil
-}
-
+// isRetriableError determines if an error is considered retriable.
 func isRetriableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
 	if pgErr, ok := err.(*pgconn.PgError); ok {
-		return strings.HasPrefix(pgErr.Code, "08")
+		if strings.HasPrefix(pgErr.Code, "08") {
+			return true
+		}
 	}
 
 	if pathErr, ok := err.(*os.PathError); ok {
-		return pathErr.Err == syscall.EAGAIN || pathErr.Err == syscall.EWOULDBLOCK
+		if pathErr.Err == syscall.EAGAIN || pathErr.Err == syscall.EWOULDBLOCK {
+			return true
+		}
 	}
 
 	return false

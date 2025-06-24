@@ -1,123 +1,123 @@
 package middlewares
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"database/sql"
 	"net/http"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/sbilibin2017/go-yandex-practicum/internal/logger"
-	"go.uber.org/zap"
 )
 
-func TxMiddleware(db *sqlx.DB) func(http.Handler) http.Handler {
+// TxOption defines a functional option for configuring TxMiddleware.
+type TxOption func(*txMiddleware)
+
+type txMiddleware struct {
+	db       *sqlx.DB
+	txOpts   *sql.TxOptions
+	txSetter func(ctx context.Context, tx *sqlx.Tx) context.Context
+}
+
+// WithDB sets the database connection to be used by the transaction middleware.
+func WithDB(db *sqlx.DB) TxOption {
+	return func(mw *txMiddleware) {
+		mw.db = db
+	}
+}
+
+// WithTxOptions sets transaction options such as isolation level or read-only flag.
+func WithTxOptions(opts *sql.TxOptions) TxOption {
+	return func(mw *txMiddleware) {
+		mw.txOpts = opts
+	}
+}
+
+// WithTxSetter sets a function to inject the started transaction into the request context.
+func WithTxSetter(setter func(ctx context.Context, tx *sqlx.Tx) context.Context) TxOption {
+	return func(mw *txMiddleware) {
+		mw.txSetter = setter
+	}
+}
+
+// TxMiddleware returns an HTTP middleware that starts a DB transaction before handling the request,
+// commits if successful, and rolls back on error.
+// If no DB is configured, it passes through without starting a transaction.
+func TxMiddleware(opts ...TxOption) (func(http.Handler) http.Handler, error) {
+	mw := &txMiddleware{}
+
+	for _, opt := range opts {
+		opt(mw)
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if db == nil {
+			if mw.db == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			tx, err := db.BeginTxx(r.Context(), nil)
+			tx, err := mw.db.BeginTxx(r.Context(), mw.txOpts)
 			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
 
-			ctx := setTx(r.Context(), tx)
-			rr := &responseRecorder{ResponseWriter: w}
-
-			err = withTx(ctx, func(ctx context.Context) error {
-				next.ServeHTTP(rr, r.WithContext(ctx))
-				return nil
-			})
-			if err != nil {
-				logger.Log.Error(zap.Error(err))
+			ctx := r.Context()
+			if mw.txSetter != nil {
+				ctx = mw.txSetter(ctx, tx)
+				r = r.WithContext(ctx)
 			}
+
+			brw := newBufferedTxResponseWriter()
+			next.ServeHTTP(brw, r)
+
+			if err := tx.Commit(); err != nil {
+				_ = tx.Rollback() // ignore rollback error
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			brw.flushTo(w)
 		})
-	}
+	}, nil
 }
 
-type responseRecorder struct {
-	http.ResponseWriter
+// bufferedTxResponseWriter buffers HTTP response headers, status code, and body.
+type bufferedTxResponseWriter struct {
+	headers     http.Header
+	body        bytes.Buffer
+	statusCode  int
 	wroteHeader bool
 }
 
-func (r *responseRecorder) WriteHeader(code int) {
-	if !r.wroteHeader {
-		r.wroteHeader = true
-		r.ResponseWriter.WriteHeader(code)
+func newBufferedTxResponseWriter() *bufferedTxResponseWriter {
+	return &bufferedTxResponseWriter{
+		headers:    make(http.Header),
+		statusCode: http.StatusOK,
 	}
 }
 
-func (r *responseRecorder) Write(b []byte) (int, error) {
-	return r.ResponseWriter.Write(b)
+func (b *bufferedTxResponseWriter) Header() http.Header {
+	return b.headers
 }
 
-// WithTx executes fn with the transaction stored in the context.
-// It commits if fn returns nil, rolls back on error or panic.
-func withTx(
-	ctx context.Context,
-	fn func(ctx context.Context) error,
-) error {
-	tx := getTx(ctx)
-	if tx == nil {
-		return fmt.Errorf("no transaction in context")
+func (b *bufferedTxResponseWriter) WriteHeader(statusCode int) {
+	if !b.wroteHeader {
+		b.statusCode = statusCode
+		b.wroteHeader = true
 	}
+}
 
-	defer func() {
-		if r := recover(); r != nil {
-			_ = tx.Rollback()
-			panic(r) // rethrow after rollback
+func (b *bufferedTxResponseWriter) Write(data []byte) (int, error) {
+	return b.body.Write(data)
+}
+
+func (b *bufferedTxResponseWriter) flushTo(w http.ResponseWriter) {
+	for k, vv := range b.headers {
+		for _, v := range vv {
+			w.Header().Add(k, v)
 		}
-	}()
-
-	if err := fn(ctx); err != nil {
-		_ = tx.Rollback()
-		return err
 	}
-
-	if err := tx.Commit(); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-
-	return nil
-}
-
-type txContextKey struct{}
-
-func setTx(ctx context.Context, tx *sqlx.Tx) context.Context {
-	return context.WithValue(ctx, txContextKey{}, tx)
-}
-
-func getTx(ctx context.Context) *sqlx.Tx {
-	tx, _ := ctx.Value(txContextKey{}).(*sqlx.Tx)
-	return tx
-}
-
-// namedPreparer — интерфейс, определяющий возможность подготовки именованных запросов в контексте.
-// Используется для унификации работы с транзакцией (sqlx.Tx) и базой данных (sqlx.DB).
-type Executor interface {
-	// PrepareNamedContext подготавливает именованный запрос в заданном контексте.
-	PrepareNamedContext(ctx context.Context, query string) (*sqlx.NamedStmt, error)
-}
-
-// getExecutor возвращает объект для выполнения SQL-запросов с именованными параметрами.
-// Если в контексте (через txGetter) присутствует транзакция, она будет использована для подготовки запроса;
-// в противном случае возвращается экземпляр базы данных *sqlx.DB.
-// Параметры:
-//   - ctx: контекст выполнения запроса.
-//   - db: база данных, используемая как запасной вариант.
-//   - txGetter: функция для извлечения транзакции из контекста.
-//
-// Возвращает объект, реализующий интерфейс namedPreparer.
-func GetExecutor(
-	ctx context.Context,
-	db *sqlx.DB,
-) Executor {
-	if tx := getTx(ctx); tx != nil {
-		return tx
-	}
-	return db
+	w.WriteHeader(b.statusCode)
+	w.Write(b.body.Bytes())
 }
